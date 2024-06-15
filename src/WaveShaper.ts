@@ -157,10 +157,6 @@ export class WaveShaper {
       .on("mousemove", (e) => {
         const target = this.getTargetElement(e, false);
 
-        if (target?.type === "interval") {
-          console.log(target);
-        }
-
         this.#mouseOver.forEach((fn) => {
           const bindData = fn(e, target, this.#xScale, this.#yScale);
           bindData && this.#ee.emit("bind", bindData);
