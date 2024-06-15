@@ -17,9 +17,15 @@ export interface Track {
   color: string;
 }
 
+export interface AudioData {
+  id: string;
+  data: Float32Array;
+}
+
 export interface WaveShaperState {
   intervals: Interval[];
   tracks: Track[];
+  audioData: AudioData[];
 }
 
 export type DragFn<TItem> = (

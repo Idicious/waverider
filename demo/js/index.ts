@@ -9,8 +9,8 @@ export let trackData: Track[] = [
 ];
 
 export let audioData = [
-  { id: crypto.randomUUID(), file: "audio/01_Kick.wav" },
-  { id: crypto.randomUUID(), file: "audio/02_Snare.wav" },
+  { id: crypto.randomUUID(), data: new Float32Array() },
+  { id: crypto.randomUUID(), data: new Float32Array() },
 ];
 
 export let intervalData: Interval[] = [
@@ -37,6 +37,8 @@ export let intervalData: Interval[] = [
 const waveShaper = new WaveShaper(800, 600, 100, canvas, {
   intervals: intervalData,
   tracks: trackData,
+  audioData: audioData,
 });
+
 waveShaper.process();
 waveShaper.run();
