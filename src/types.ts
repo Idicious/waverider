@@ -24,21 +24,21 @@ export interface WaveShaperState {
 
 export type DragFn<TItem> = (
   e: d3.D3DragEvent<any, TItem, any>,
-  d: TItem,
+  d: BoundData<TItem>,
   xScale: d3.ScaleLinear<number, number>,
   yScale: d3.ScaleBand<string>
 ) => void | BindData;
 
 export type ClickFn<TItem> = (
   e: MouseEvent,
-  d: TItem,
+  d: BoundData<TItem>,
   xScale: d3.ScaleLinear<number, number>,
   yScale: d3.ScaleBand<string>
 ) => void | BindData;
 
 export type MouseOverFn<TItem> = (
   e: MouseEvent,
-  d: TItem,
+  d: BoundData<TItem> | undefined,
   xScale: d3.ScaleLinear<number, number>,
   yScale: d3.ScaleBand<string>
 ) => void | BindData;
@@ -53,32 +53,59 @@ export interface BoundData<T = any> {
 }
 
 export interface BindData {
-  type?: string;
-  filterFn?: (d: any) => boolean;
+  type: string;
 }
 
-export interface RegisterableType<
-  TState extends WaveShaperState,
-  TCollection extends Array<TItem>,
-  TItem
-> {
-  type: string;
-  stateSelector: (state: TState) => TCollection;
-  keyFn: (d: TItem) => string;
-  bind: (
-    selection: d3.Selection<any, TItem, any, any>,
+export abstract class WaveShapeRenderer {
+  abstract TYPE: string;
+
+  abstract bind(
+    selection: d3.Selection<any, any, any, any>,
+    state: WaveShaperState,
     xScale: d3.ScaleLinear<number, number>,
-    yScale: d3.ScaleBand<string>,
-    updateFilter: (d: TItem) => boolean
-  ) => void;
-  render: (
-    selection: d3.Selection<any, TItem, any, any>,
+    yScale: d3.ScaleBand<string>
+  ): void;
+
+  abstract render(
+    selection: d3.Selection<any, any, any, any>,
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     toHidden: boolean
-  ) => void;
-  dragMap: Map<string, DragFn<TItem>>;
-  dragStartMap: Map<string, DragFn<TItem>>;
-  dragEndMap: Map<string, DragFn<TItem>>;
-  clickMap: Map<string, ClickFn<TItem>>;
-  mouseOverMap: Map<string, MouseOverFn<TItem>>;
+  ): void;
+
+  abstract onDrag(
+    e: d3.D3DragEvent<any, any, any>,
+    d: BoundData,
+    xScale: d3.ScaleLinear<number, number>,
+    yScale: d3.ScaleBand<string>
+  ): void | BindData;
+
+  abstract onDragStart(
+    e: d3.D3DragEvent<any, any, any>,
+    d: BoundData<any>,
+    xScale: d3.ScaleLinear<number, number>,
+    yScale: d3.ScaleBand<string>
+  ): void | BindData;
+
+  abstract onDragEnd(
+    e: d3.D3DragEvent<any, any, any>,
+    d: BoundData,
+    xScale: d3.ScaleLinear<number, number>,
+    yScale: d3.ScaleBand<string>
+  ): void | BindData;
+
+  abstract onClick(
+    e: MouseEvent,
+    d: BoundData,
+    xScale: d3.ScaleLinear<number, number>,
+    yScale: d3.ScaleBand<string>
+  ): void | BindData;
+
+  abstract onMouseOver(
+    e: MouseEvent,
+    d: BoundData | undefined,
+    xScale: d3.ScaleLinear<number, number>,
+    yScale: d3.ScaleBand<string>
+  ): void | BindData;
 }
+
+export type Predicate = (...args: any[]) => boolean;

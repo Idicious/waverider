@@ -13,65 +13,44 @@ import type {
   ClickFn,
   DragFn,
   MouseOverFn,
-  RegisterableType,
+  WaveShapeRenderer,
   UpdateFn,
   WaveShaperState,
 } from "./types";
-import { IntervalRenderer } from "./register/interval";
+import { IntervalRenderer } from "./renderers/interval";
 
 export const DEFAULT_TIME_DOMAIN = [0, 30000];
 export const TRACK_HEIGHT = 100;
-export const ALWAYS = () => true;
 
 export class WaveShaper {
   #ee = new EventEmitter();
   #drag = d3
     .drag<HTMLCanvasElement, unknown>()
     .on("drag", (event: d3.D3DragEvent<any, any, any>) => {
-      if (this.#dragData != null) {
-        const drag = this.#dragMap.get(this.#dragData.type);
+      if (this.#dragData == null) return;
 
-        if (drag == null) return;
-        const bindData = drag(
-          event,
-          this.#dragData.data,
-          this.#xScale,
-          this.#yScale
-        );
+      this.#onDrag.forEach((fn) => {
+        const bindData = fn(event, this.#dragData!, this.#xScale, this.#yScale);
         bindData && this.#ee.emit("bind", bindData);
-      }
+      });
     })
     .on("start", (event: d3.D3DragEvent<any, any, any>) => {
       const target = this.getTargetElement(event);
-      if (target != null && this.#draggableSet.has(target.type)) {
-        this.#dragData = target;
+      if (target == null) return;
 
-        const dragStart = this.#dragStartMap.get(this.#dragData.type);
-
-        if (dragStart != null) {
-          const bindData = dragStart(
-            event,
-            this.#dragData.data,
-            this.#xScale,
-            this.#yScale
-          );
-          bindData && this.#ee.emit("bind", bindData);
-        }
-      }
+      this.#dragData = target;
+      this.#onDragStart.forEach((fn) => {
+        const bindData = fn(event, target, this.#xScale, this.#yScale);
+        bindData && this.#ee.emit("bind", bindData);
+      });
     })
     .on("end", (event: d3.D3DragEvent<any, any, any>) => {
       if (this.#dragData == null) return;
-      const dragEnd = this.#dragEndMap.get(this.#dragData.type);
 
-      if (dragEnd != null) {
-        const bindData = dragEnd(
-          event,
-          this.#dragData.data,
-          this.#xScale,
-          this.#yScale
-        );
+      this.#onDragEnd.forEach((fn) => {
+        const bindData = fn(event, this.#dragData!, this.#xScale, this.#yScale);
         bindData && this.#ee.emit("bind", bindData);
-      }
+      });
 
       this.#dragData = null;
       this.redrawHidden();
@@ -101,18 +80,12 @@ export class WaveShaper {
 
   #typeRoots = new Map<string, d3.Selection<HTMLElement, any, any, any>>();
   #bindMap = new Map<number, { type: string; data: unknown }>();
-  #draggableSet = new Set<string>();
-  #dragStartSet = new Set<string>();
-  #dragEndSet = new Set<string>();
-  #clickableSet = new Set<string>();
-  #mouseOverSet = new Set<string>();
-  #dragMap = new Map<string, DragFn<any>>();
-  #dragStartMap = new Map<string, DragFn<any>>();
-  #dragEndMap = new Map<string, DragFn<any>>();
-  #clickMap = new Map<string, ClickFn<any>>();
-  #mouseOverMap = new Map<string, MouseOverFn<any>>();
+  #onDrag: Array<DragFn<any>> = [];
+  #onDragStart: Array<DragFn<any>> = [];
+  #onDragEnd: Array<DragFn<any>> = [];
+  #onClick: Array<ClickFn<any>> = [];
+  #onMouseOver: Array<MouseOverFn<any>> = [];
   #dragData: BoundData | null = null;
-  #mouseOver: MouseOverFn<BindData | undefined>[] = [];
 
   constructor(
     private readonly width: number,
@@ -148,26 +121,18 @@ export class WaveShaper {
         const target = this.getTargetElement(e);
         if (target == null) return;
 
-        const click = this.#clickMap.get(target.type);
-        if (click == null) return;
-
-        const bindData = click(e, target.data, this.#xScale, this.#yScale);
-        bindData && this.#ee.emit("bind", bindData);
+        this.#onClick.forEach((fn) => {
+          const bindData = fn(e, target, this.#xScale, this.#yScale);
+          bindData && this.#ee.emit("bind", bindData);
+        });
       })
       .on("mousemove", (e) => {
         const target = this.getTargetElement(e, false);
 
-        this.#mouseOver.forEach((fn) => {
+        this.#onMouseOver.forEach((fn) => {
           const bindData = fn(e, target, this.#xScale, this.#yScale);
           bindData && this.#ee.emit("bind", bindData);
         });
-
-        if (target == null) return;
-        const mouseOver = this.#mouseOverMap.get(target.type);
-        if (mouseOver == null) return;
-
-        const bindData = mouseOver(e, target.data, this.#xScale, this.#yScale);
-        bindData && this.#ee.emit("bind", bindData);
       });
 
     this.registerType(
@@ -187,77 +152,43 @@ export class WaveShaper {
     this.redrawHidden();
   }
 
-  registerType<TCollection extends Array<TItem>, TItem>(
-    register: RegisterableType<WaveShaperState, TCollection, TItem>
-  ) {
-    if (this.#typeRoots.has(register.type))
-      throw new Error(`Type already registered: ${register.type}`);
+  registerType<T extends WaveShapeRenderer>(register: T) {
+    if (this.#typeRoots.has(register.TYPE))
+      throw new Error(`Type already registered: ${register.TYPE}`);
 
-    register.dragMap.forEach((value, key) => {
-      this.#draggableSet.add(key);
-      this.#dragMap.set(key, value);
-    });
-
-    register.dragStartMap.forEach((value, key) => {
-      this.#dragStartSet.add(key);
-      this.#dragStartMap.set(key, value);
-    });
-
-    register.dragEndMap.forEach((value, key) => {
-      this.#dragEndSet.add(key);
-      this.#dragEndMap.set(key, value);
-    });
-
-    register.clickMap.forEach((value, key) => {
-      this.#clickableSet.add(key);
-      this.#clickMap.set(key, value);
-    });
-
-    register.mouseOverMap.forEach((value, key) => {
-      if (key === "*") {
-        this.#mouseOver.push(value as any);
-      } else {
-        this.#mouseOverSet.add(key);
-        this.#mouseOverMap.set(key, value);
-      }
-    });
+    this.#onDrag.push(register.onDrag.bind(register));
+    this.#onDragStart.push(register.onDragStart.bind(register));
+    this.#onDragEnd.push(register.onDragEnd.bind(register));
+    this.#onClick.push(register.onClick.bind(register));
+    this.#onMouseOver.push(register.onMouseOver.bind(register));
 
     const rootElement = document.createElement("custom");
     const rootSelection = d3.select(rootElement);
 
-    this.#typeRoots.set(register.type, rootSelection);
+    this.#typeRoots.set(register.TYPE, rootSelection);
 
     this.#ee.on("bind", (data?: BindData) => {
-      if (data?.type && data.type !== register.type) return;
+      if (data?.type && data.type !== register.TYPE) return;
 
-      const root = this.#typeRoots.get(register.type);
-      if (root == null)
-        throw new Error(`Type not registered: ${register.type}`);
+      const root = this.#typeRoots.get(register.TYPE);
 
-      const selection = root
-        .selectAll(`custom.${register.type}`)
-        .data(register.stateSelector(this.state), register.keyFn as any);
+      if (root == null) {
+        throw new Error(`Type not registered: ${register.TYPE}`);
+      }
 
-      register.bind(
-        selection,
-        this.#xScale,
-        this.#yScale,
-        data?.filterFn ?? ALWAYS
-      );
+      register.bind(root, this.state, this.#xScale, this.#yScale);
     });
 
     this.#ee.on("render", (toHidden = false) => {
-      const rootSelection = this.#typeRoots.get(register.type);
-      if (rootSelection == null)
-        throw new Error(`Type not registered: ${register.type}`);
+      const rootSelection = this.#typeRoots.get(register.TYPE);
+
+      if (rootSelection == null) {
+        throw new Error(`Type not registered: ${register.TYPE}`);
+      }
 
       const context = toHidden ? this.#ctxHidden : this.#ctx;
 
-      register.render(
-        rootSelection.selectAll(`custom.${register.type}`),
-        context,
-        toHidden
-      );
+      register.render(rootSelection, context, toHidden);
     });
   }
 
