@@ -24,9 +24,16 @@ const MOUSE_CURSOR = {
   default: "default",
 } as Record<string, string>;
 
+/**
+ * The interval renderer is responsible for rendering the audio intervals on the canvas.
+ * These are segments of audio when can be dragged, resized, cut and moved around within the same horizontal plane which represents a track,
+ * as well as across different tracks.
+ */
 export class IntervalRenderer extends WaveShapeRenderer {
-  #filterFn: Predicate = ALWAYS;
   TYPE = INTERVAL_RENDERER_TYPE;
+
+  #filterFn: Predicate = ALWAYS;
+  #bindFilter = { type: this.TYPE } as const;
 
   constructor(
     private readonly bindFn: (data: Interval, type: string) => string,
@@ -57,7 +64,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
       }
     }
 
-    return { type: this.type };
+    return this.#bindFilter;
   }
 
   onDragStart(_: d3.D3DragEvent<any, any, any>, d: BoundData<Interval>) {
@@ -68,7 +75,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
           const index = d3.max(state.intervals, (i) => i.index) ?? 1;
           d.data.index = index + 1;
 
-          return [state, { type: this.type }];
+          return [state, this.#bindFilter];
         });
         break;
       }
@@ -100,8 +107,6 @@ export class IntervalRenderer extends WaveShapeRenderer {
     this.canvas.style.cursor = cursor ?? "default";
   }
 
-  type = INTERVAL_RENDERER_TYPE;
-
   bind(
     selection: d3.Selection<HTMLElement, any, any, any>,
     state: WaveShaperState,
@@ -109,7 +114,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
     yScale: d3.ScaleBand<string>
   ) {
     return selection
-      .selectAll<any, Interval>(`custom.${this.type}`)
+      .selectAll<any, Interval>(`custom.${this.TYPE}`)
       .data(state.intervals, (d) => d.id)
       .join(
         (enter) => {
@@ -172,7 +177,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
     toHidden: boolean
   ) {
     return selection
-      .selectAll<any, Interval>(`custom.${this.type}`)
+      .selectAll<any, Interval>(`custom.${this.TYPE}`)
       .each(function (d) {
         const node = d3.select(this);
         const resizeLeft = node.select(`custom.${RESIZE_LEFT_TYPE}`);

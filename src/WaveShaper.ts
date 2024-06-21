@@ -1,23 +1,17 @@
 import * as d3 from "d3";
 import EventEmitter from "eventemitter3";
-import {
-  COLOR_TOLERANCE,
-  genColor,
-  numberToRGBString,
-  rgbToNumber,
-  roundToClosestMultipleOf,
-} from "./bind";
+import { genColor, numberToRGBString, toBindColor } from "./bind";
+import { IntervalRenderer } from "./renderers/interval";
 import type {
   BindData,
   BoundData,
   ClickFn,
   DragFn,
   MouseOverFn,
-  WaveShapeRenderer,
   UpdateFn,
+  WaveShapeRenderer,
   WaveShaperState,
 } from "./types";
-import { IntervalRenderer } from "./renderers/interval";
 
 export const DEFAULT_TIME_DOMAIN = [0, 30000];
 export const TRACK_HEIGHT = 100;
@@ -202,12 +196,9 @@ export class WaveShaper {
     redraw && this.redrawHidden();
 
     const [x, y] = d3.pointer(event);
-    const color = this.#ctxHidden.getImageData(x, y, 1, 1).data;
-    const uniqueColor = roundToClosestMultipleOf(
-      rgbToNumber(color),
-      COLOR_TOLERANCE
-    );
-    return this.#bindMap.get(uniqueColor);
+    const rgb = this.#ctxHidden.getImageData(x, y, 1, 1).data;
+    const bindColor = toBindColor(rgb);
+    return this.#bindMap.get(bindColor);
   }
 
   process() {
