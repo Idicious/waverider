@@ -20,6 +20,7 @@ export class WaveShaper {
   #ee = new EventEmitter();
   #drag = d3
     .drag<HTMLCanvasElement, unknown>()
+    .filter((event) => !event.metaKey)
     .on("drag", (event: d3.D3DragEvent<any, any, any>) => {
       if (this.#dragData == null) return;
 
