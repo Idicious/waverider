@@ -95,7 +95,15 @@ export class IntervalRenderer extends WaveShapeRenderer {
     d: BoundData<Interval>,
     xScale: d3.ScaleLinear<number, number, never>,
     yScale: d3.ScaleBand<string>
-  ) {}
+  ) {
+    // TODO: implement cut interval
+
+    switch (d.type) {
+      case INTERVAL_TYPE:
+        this.cutInterval(e, d.data, xScale);
+        break;
+    }
+  }
 
   onMouseOver(
     _: MouseEvent,
@@ -226,6 +234,37 @@ export class IntervalRenderer extends WaveShapeRenderer {
           height
         );
       });
+  }
+
+  cutInterval(
+    e: MouseEvent,
+    data: Interval,
+    xScale: d3.ScaleLinear<number, number>
+  ) {
+    if (e.metaKey) {
+      // get the x position of the click
+      const [x, y] = d3.pointer(e);
+      const timeCut = xScale.invert(x);
+
+      // create a new interval
+      let newInterval = {
+        start: data.start,
+        offsetStart: timeCut - data.start,
+        end: data.end,
+        index: data.index,
+        track: data.track,
+        data: data.data,
+        id: crypto.randomUUID(),
+      };
+
+      // update existing interval
+      data.end = timeCut;
+
+      this.updateState((state) => {
+        state.intervals.push(newInterval);
+        return [state, this.#bindFilter];
+      });
+    }
   }
 }
 
