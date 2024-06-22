@@ -34,6 +34,9 @@ export class IntervalRenderer extends WaveShapeRenderer {
 
   #filterFn: Predicate = ALWAYS;
   #bindFilter = { type: this.TYPE } as const;
+  #resetFilter = () => {
+    this.#filterFn = ALWAYS;
+  };
 
   constructor(
     private readonly bindFn: (data: Interval, type: string) => string,
@@ -69,18 +72,22 @@ export class IntervalRenderer extends WaveShapeRenderer {
 
   onDragStart(_: d3.D3DragEvent<any, any, any>, d: BoundData<Interval>) {
     switch (d.type) {
-      case INTERVAL_TYPE: {
-        this.#filterFn = (i: Interval) => i.track === d.data.track;
+      case INTERVAL_TYPE:
+      case RESIZE_LEFT_TYPE:
+      case RESIZE_RIGHT_TYPE: {
+        this.#filterFn = (i: Interval) => i.id === d.data.id;
         this.updateState((state) => {
           const index = d3.max(state.intervals, (i) => i.index) ?? 1;
           d.data.index = index + 1;
 
-          return [state, this.#bindFilter];
+          return [state, this.#bindFilter, undefined];
         });
+
         break;
       }
     }
   }
+
   onDragEnd(_: d3.D3DragEvent<any, Interval, any>, d: BoundData<Interval>) {
     switch (d.type) {
       case INTERVAL_TYPE: {
@@ -96,8 +103,6 @@ export class IntervalRenderer extends WaveShapeRenderer {
     xScale: d3.ScaleLinear<number, number, never>,
     yScale: d3.ScaleBand<string>
   ) {
-    // TODO: implement cut interval
-
     switch (d.type) {
       case INTERVAL_TYPE:
         this.cutInterval(e, d.data, xScale);
@@ -263,14 +268,9 @@ export class IntervalRenderer extends WaveShapeRenderer {
       this.#filterFn = (i: Interval) => i.id === data.id;
       this.updateState((state) => {
         state.intervals.push(newInterval);
-        return [state, this.#bindFilter];
+        return [state, this.#bindFilter, this.#resetFilter];
       });
     }
-  }
-
-  // Always reset the filter function when the state is updated
-  onStateUpdated() {
-    this.#filterFn = ALWAYS;
   }
 }
 

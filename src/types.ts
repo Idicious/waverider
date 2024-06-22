@@ -51,7 +51,7 @@ export type MouseOverFn<TItem> = (
 
 export type UpdateFn<T extends WaveShaperState> = (
   state: T
-) => [T, BindData | undefined];
+) => [T, BindData | undefined, (() => void) | undefined];
 
 export interface BoundData<T = any> {
   type: string;
@@ -112,8 +112,6 @@ export abstract class WaveShapeRenderer {
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ): void | BindData;
-
-  abstract onStateUpdated(state: WaveShaperState): void;
 }
 
 export type Predicate = (...args: any[]) => boolean;

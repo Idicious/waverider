@@ -80,7 +80,6 @@ export class WaveShaper {
   #onDragEnd: Array<DragFn<any>> = [];
   #onClick: Array<ClickFn<any>> = [];
   #onMouseOver: Array<MouseOverFn<any>> = [];
-  #onStateUpdated: Array<(state: WaveShaperState) => void> = [];
   #dragData: BoundData | null = null;
 
   constructor(
@@ -141,13 +140,13 @@ export class WaveShaper {
   }
 
   updateState(fn: UpdateFn<WaveShaperState>) {
-    const [state, bindData] = fn(this.state);
+    const [state, bindData, cb] = fn(this.state);
     this.state = state;
 
     this.#ee.emit("bind", bindData);
     this.redrawHidden();
 
-    this.#onStateUpdated.forEach((fn) => fn(state));
+    cb?.();
   }
 
   registerType<T extends WaveShapeRenderer>(register: T) {
@@ -159,7 +158,6 @@ export class WaveShaper {
     this.#onDragEnd.push(register.onDragEnd.bind(register));
     this.#onClick.push(register.onClick.bind(register));
     this.#onMouseOver.push(register.onMouseOver.bind(register));
-    this.#onStateUpdated.push(register.onStateUpdated.bind(register));
 
     const rootElement = document.createElement("custom");
     const rootSelection = d3.select(rootElement);
