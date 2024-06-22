@@ -260,11 +260,17 @@ export class IntervalRenderer extends WaveShapeRenderer {
       // update existing interval
       data.end = timeCut;
 
+      this.#filterFn = (i: Interval) => i.id === data.id;
       this.updateState((state) => {
         state.intervals.push(newInterval);
         return [state, this.#bindFilter];
       });
     }
+  }
+
+  // Always reset the filter function when the state is updated
+  onStateUpdated() {
+    this.#filterFn = ALWAYS;
   }
 }
 

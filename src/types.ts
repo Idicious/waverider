@@ -112,6 +112,8 @@ export abstract class WaveShapeRenderer {
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ): void | BindData;
+
+  abstract onStateUpdated(state: WaveShaperState): void;
 }
 
 export type Predicate = (...args: any[]) => boolean;
