@@ -9,6 +9,7 @@ import {
 } from "../types";
 import { BIND_ATTR } from "../bind";
 import { ALWAYS, invertYScale } from "../utils";
+import { summarizeAudio } from "../audio";
 
 const INTERVAL_RENDERER_TYPE = "interval";
 const INTERVAL_TYPE = "interval";
@@ -34,6 +35,8 @@ export class IntervalRenderer extends WaveShapeRenderer {
 
   #filterFn: Predicate = ALWAYS;
   #bindFilter = { type: this.TYPE } as const;
+  #zoomFactor = 1;
+
   #resetFilter = () => {
     this.#filterFn = ALWAYS;
   };
@@ -41,9 +44,14 @@ export class IntervalRenderer extends WaveShapeRenderer {
   constructor(
     private readonly bindFn: (data: Interval, type: string) => string,
     private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
-    private readonly canvas: HTMLCanvasElement
+    private readonly canvas: HTMLCanvasElement,
+    private readonly width: number
   ) {
     super();
+  }
+
+  onZoom(e: d3.D3ZoomEvent<any, any>) {
+    this.#zoomFactor = e.transform.k;
   }
 
   onDrag(
@@ -90,7 +98,9 @@ export class IntervalRenderer extends WaveShapeRenderer {
 
   onDragEnd(_: d3.D3DragEvent<any, Interval, any>, d: BoundData<Interval>) {
     switch (d.type) {
-      case INTERVAL_TYPE: {
+      case INTERVAL_TYPE:
+      case RESIZE_LEFT_TYPE:
+      case RESIZE_RIGHT_TYPE: {
         this.#filterFn = ALWAYS;
         break;
       }
@@ -120,6 +130,37 @@ export class IntervalRenderer extends WaveShapeRenderer {
     this.canvas.style.cursor = cursor ?? "default";
   }
 
+  getSummarizedAudio(
+    interval: Interval,
+    state: WaveShaperState,
+    xScale: d3.ScaleLinear<number, number>
+  ) {
+    const valueOne = xScale.invert(1);
+    const valueZero = xScale.invert(0);
+    const valueEnd = xScale.invert(this.width);
+    const msPerPixel = valueOne - valueZero;
+    const samplesPerPixel = msPerPixel * 44.1;
+    const start = actualStart(interval);
+
+    const msIntoInterval = Math.max(valueZero, start) - start;
+    const intervalScreenDuration =
+      Math.min(valueEnd, interval.end) - Math.max(valueZero, start);
+
+    const audioData = state.audioData.find((a) => a.id === interval.data);
+
+    // Interval is not in viewport, render nothing
+    if (intervalScreenDuration <= 0 || audioData === undefined) return [];
+
+    return summarizeAudio(
+      audioData.data,
+      interval.id,
+      msIntoInterval + interval.offsetStart,
+      intervalScreenDuration,
+      samplesPerPixel,
+      this.#zoomFactor
+    );
+  }
+
   bind(
     selection: d3.Selection<HTMLElement, any, any, any>,
     state: WaveShaperState,
@@ -145,8 +186,8 @@ export class IntervalRenderer extends WaveShapeRenderer {
                 DEFAULT_COLOR
             )
             .attr(BIND_ATTR, (d) => this.bindFn(d, INTERVAL_TYPE))
-            .each(function (d) {
-              d.summary = [];
+            .each((d) => {
+              d.summary = this.getSummarizedAudio(d, state, xScale);
             });
 
           container
@@ -173,8 +214,8 @@ export class IntervalRenderer extends WaveShapeRenderer {
                 DEFAULT_COLOR
             )
             .attr("width", (d) => getIntervalWidth(d, xScale))
-            .each(function (d) {
-              d.summary = [];
+            .each((d) => {
+              d.summary = this.getSummarizedAudio(d, state, xScale);
             });
 
           return update;

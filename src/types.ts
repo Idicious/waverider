@@ -49,6 +49,8 @@ export type MouseOverFn<TItem> = (
   yScale: d3.ScaleBand<string>
 ) => void | BindData;
 
+export type ZoomFn = (e: d3.D3ZoomEvent<any, any>) => void;
+
 export type UpdateFn<T extends WaveShaperState> = (
   state: T
 ) => [T, BindData | undefined, (() => void) | undefined];
@@ -112,6 +114,8 @@ export abstract class WaveShapeRenderer {
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ): void | BindData;
+
+  abstract onZoom(e: d3.D3ZoomEvent<any, any>): void;
 }
 
 export type Predicate = (...args: any[]) => boolean;

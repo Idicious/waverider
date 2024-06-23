@@ -11,13 +11,15 @@ import type {
   UpdateFn,
   WaveShapeRenderer,
   WaveShaperState,
+  ZoomFn,
 } from "./types";
 
 export const DEFAULT_TIME_DOMAIN = [0, 30000];
-export const TRACK_HEIGHT = 100;
+export const TRACK_HEIGHT = 200;
 
 export class WaveShaper {
   #ee = new EventEmitter();
+
   #drag = d3
     .drag<HTMLCanvasElement, unknown>()
     .filter((event) => !event.metaKey)
@@ -61,6 +63,8 @@ export class WaveShaper {
     ])
     .on("zoom", (e: d3.D3ZoomEvent<any, any>) => {
       this.#xScale = e.transform.rescaleX(this.#xScaleOriginal);
+
+      this.#onZoom.forEach((fn) => fn(e));
       this.#ee.emit("bind");
     })
     .on("end", () => {
@@ -85,6 +89,7 @@ export class WaveShaper {
   #onDragEnd: Array<DragFn<any>> = [];
   #onClick: Array<ClickFn<any>> = [];
   #onMouseOver: Array<MouseOverFn<any>> = [];
+  #onZoom: Array<ZoomFn> = [];
   #dragData: BoundData | null = null;
   #width: number;
   #height: number;
@@ -151,7 +156,8 @@ export class WaveShaper {
       new IntervalRenderer(
         this.bindData.bind(this),
         this.updateState.bind(this),
-        this.canvas
+        this.canvas,
+        width
       )
     );
   }
@@ -175,6 +181,7 @@ export class WaveShaper {
     this.#onDragEnd.push(register.onDragEnd.bind(register));
     this.#onClick.push(register.onClick.bind(register));
     this.#onMouseOver.push(register.onMouseOver.bind(register));
+    this.#onZoom.push(register.onZoom.bind(register));
 
     const rootElement = document.createElement("custom");
     const rootSelection = d3.select(rootElement);
