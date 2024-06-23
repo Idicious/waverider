@@ -106,14 +106,14 @@ export class WaveShaper {
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
 
-    this.#hiddenCanvas = new OffscreenCanvas(width, height);
+    this.#hiddenCanvas = new OffscreenCanvas(this.#width, this.#height);
 
     this.#ctx = this.canvas.getContext("2d")!;
     this.#ctxHidden = this.#hiddenCanvas.getContext("2d", {
       willReadFrequently: true,
     })!;
 
-    this.#ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.#ctx.scale(dpr, dpr);
 
     this.#yScale = d3
       .scaleBand()
@@ -123,7 +123,7 @@ export class WaveShaper {
     this.#xScaleOriginal = d3
       .scaleLinear()
       .domain(DEFAULT_TIME_DOMAIN)
-      .range([0, this.#width]);
+      .range([0, width]);
     this.#xScale = this.#xScaleOriginal.copy();
 
     d3.select(canvas)
