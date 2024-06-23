@@ -54,6 +54,11 @@ export class WaveShaper {
   #zoom = d3
     .zoom<HTMLCanvasElement, unknown>()
     .filter((e) => e.metaKey)
+    .scaleExtent([-Infinity, Infinity])
+    .translateExtent([
+      [0, 0],
+      [Infinity, Infinity],
+    ])
     .on("zoom", (e: d3.D3ZoomEvent<any, any>) => {
       this.#xScale = e.transform.rescaleX(this.#xScaleOriginal);
       this.#ee.emit("bind");
@@ -81,22 +86,34 @@ export class WaveShaper {
   #onClick: Array<ClickFn<any>> = [];
   #onMouseOver: Array<MouseOverFn<any>> = [];
   #dragData: BoundData | null = null;
+  #width: number;
+  #height: number;
 
   constructor(
-    private readonly width: number,
-    private readonly height: number,
+    width: number,
+    height: number,
     private readonly trackHeight: number,
     private readonly canvas: HTMLCanvasElement,
     private state: WaveShaperState
   ) {
-    canvas.width = width;
-    canvas.height = height;
+    const dpr = window.devicePixelRatio;
 
-    this.#hiddenCanvas = new OffscreenCanvas(this.width, this.height);
+    this.#width = width * dpr;
+    this.#height = height * dpr;
+
+    canvas.width = this.#width;
+    canvas.height = this.#height;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    this.#hiddenCanvas = new OffscreenCanvas(width, height);
+
     this.#ctx = this.canvas.getContext("2d")!;
     this.#ctxHidden = this.#hiddenCanvas.getContext("2d", {
       willReadFrequently: true,
     })!;
+
+    this.#ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     this.#yScale = d3
       .scaleBand()
@@ -106,7 +123,7 @@ export class WaveShaper {
     this.#xScaleOriginal = d3
       .scaleLinear()
       .domain(DEFAULT_TIME_DOMAIN)
-      .range([0, this.width]);
+      .range([0, this.#width]);
     this.#xScale = this.#xScaleOriginal.copy();
 
     d3.select(canvas)
@@ -211,12 +228,12 @@ export class WaveShaper {
   }
 
   redraw() {
-    this.#ctx.clearRect(0, 0, this.width, this.height);
+    this.#ctx.clearRect(0, 0, this.#width, this.#height);
     this.#ee.emit("render");
   }
 
   redrawHidden() {
-    this.#ctxHidden.clearRect(0, 0, this.width, this.height);
+    this.#ctxHidden.clearRect(0, 0, this.#width, this.#height);
     this.#ee.emit("render", true);
   }
 
