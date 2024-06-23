@@ -17,7 +17,11 @@ export function summarizeAudio(
 
   if (start === end) return drawData;
 
-  const startSample = Math.ceil(startMs * 44.1);
+  // Alligning the start sample used for drawing waveforms causes less shifting when introducing cuts and zoom
+  const startSample = Math.round(startMs * 44.1);
+  const samplesFromAllignment = startSample % spp;
+  const allignedStartSample = startSample - samplesFromAllignment;
+
   const skip = Math.ceil(spp / resolution);
   const length = data.length;
 
@@ -25,7 +29,7 @@ export function summarizeAudio(
   for (; start < end; start++) {
     let min = 0; // minimum value in sample range
     let max = 0; // maximum value in sample range
-    const pixelStartSample = Math.ceil(startSample + start * spp);
+    const pixelStartSample = Math.round(allignedStartSample + start * spp);
 
     // Iterate over the sample range for this pixel (spp)
     // and find the min and max values.

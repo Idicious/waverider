@@ -246,10 +246,10 @@ export class IntervalRenderer extends WaveShapeRenderer {
         const resizeLeftColor = toHidden ? resizeLeftUniqueColor : "black";
         const resizeRightColor = toHidden ? resizeRightUniqueColor : "black";
 
-        const x = Math.round(+node.attr("x"));
-        const y = Math.round(+node.attr("y"));
-        const width = Math.round(+node.attr("width"));
-        const height = Math.round(+node.attr("height"));
+        const x = getDrawValue(+node.attr("x"), toHidden);
+        const y = getDrawValue(+node.attr("y"), toHidden);
+        const width = getDrawValue(+node.attr("width"), toHidden);
+        const height = getDrawValue(+node.attr("height"), toHidden);
 
         // background
         context.fillStyle = fillColor;
@@ -334,13 +334,13 @@ export function renderWave(
 
   region.moveTo(x, center);
   for (let i = 0; i < width; i++) {
-    region.lineTo(i + x, Math.round(data[i][0] * scale + center));
+    region.lineTo(i + x, data[i][0] * scale + center);
   }
   region.lineTo(end, center);
 
   region.moveTo(x, center);
   for (let i = 0; i < width; i++) {
-    region.lineTo(i + x, Math.round(data[i][1] * scale + center));
+    region.lineTo(i + x, data[i][1] * scale + center);
   }
   region.lineTo(end, center);
   region.closePath();
@@ -418,4 +418,8 @@ function resizeRight(
   } else {
     data.end = data.end + dx;
   }
+}
+
+function getDrawValue(n: number, toHidden: boolean) {
+  return toHidden ? Math.round(n) : n;
 }
