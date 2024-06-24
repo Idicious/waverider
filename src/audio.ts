@@ -1,11 +1,13 @@
+const RESOLUTION = 128;
+const ALLIGNMENT = 128;
+
 export function summarizeAudio(
   data: Float32Array,
   cacheKey: string,
   startMs: number,
   durationMs: number,
   spp: number,
-  zoomFactor: number,
-  resolution = 128
+  zoomFactor: number
 ) {
   let [start, end, drawData, width] = getCachedData(
     cacheKey,
@@ -16,34 +18,36 @@ export function summarizeAudio(
   );
 
   if (start === end) return drawData;
+  const skip = Math.ceil(spp / RESOLUTION);
 
   // Alligning the start sample used for drawing waveforms causes less shifting when introducing cuts and zoom
-  const startSample = Math.round(startMs * 44.1);
-  const samplesFromAllignment = startSample % spp;
-  const allignedStartSample = startSample - samplesFromAllignment;
-
-  const skip = Math.ceil(spp / resolution);
+  const startSample = startMs * 44.1;
   const length = data.length;
 
   // For each pixel in draw area
   for (; start < end; start++) {
-    let min = 0; // minimum value in sample range
-    let max = 0; // maximum value in sample range
-    const pixelStartSample = Math.round(allignedStartSample + start * spp);
+    const pixelStartSample = Math.round(startSample + start * spp);
+
+    let posSum = 0;
+    let negSum = 0;
+    let count = 0;
 
     // Iterate over the sample range for this pixel (spp)
     // and find the min and max values.
-    for (let j = 0; j < spp; j += skip) {
+    for (let j = 0; j < spp; j += skip, count++) {
       const index = pixelStartSample + j;
       if (index < length) {
         const val = data[index];
-        if (val > max) {
-          max = val;
-        } else if (val < min) {
-          min = val;
+        if (val > 0) {
+          posSum += val * val;
+        } else {
+          negSum += val * val;
         }
       }
     }
+
+    const min = -Math.sqrt(negSum / count);
+    const max = Math.sqrt(posSum / count);
 
     drawData[start] = [min, max];
   }
