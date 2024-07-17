@@ -25,6 +25,7 @@ export interface AudioData {
 export interface WaveShaperState {
   intervals: Interval[];
   tracks: Track[];
+  colorMap: Map<string, string>;
   audioData: AudioData[];
 }
 

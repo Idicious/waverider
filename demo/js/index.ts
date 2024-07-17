@@ -19,6 +19,7 @@ const htmlElement = document.getElementById("root") as HTMLElement;
     {
       intervals: intervalData,
       tracks: trackData,
+      colorMap: new Map(trackData.map((d) => [d.id, d.color])),
       audioData,
     }
   );

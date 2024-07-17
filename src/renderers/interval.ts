@@ -179,12 +179,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
             .attr("y", (d) => yScale(d.track)!)
             .attr("width", (d) => getIntervalWidth(d, xScale))
             .attr("height", yScale.bandwidth())
-            .attr(
-              "fill",
-              (d) =>
-                state.tracks.find((t) => t.id === d.track)?.color ??
-                DEFAULT_COLOR
-            )
+            .attr("fill", (d) => state.colorMap.get(d.track) ?? DEFAULT_COLOR)
             .attr(BIND_ATTR, (d) => this.bindFn(d, INTERVAL_TYPE))
             .each((d) => {
               d.summary = this.getSummarizedAudio(d, state, xScale);
@@ -207,12 +202,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
             .filter(this.#filterFn)
             .attr("x", (d) => xScale(actualStart(d)))
             .attr("y", (d) => yScale(d.track)!)
-            .attr(
-              "fill",
-              (d) =>
-                state.tracks.find((t) => t.id === d.track)?.color ??
-                DEFAULT_COLOR
-            )
+            .attr("fill", (d) => state.colorMap.get(d.track) ?? DEFAULT_COLOR)
             .attr("width", (d) => getIntervalWidth(d, xScale))
             .each((d) => {
               d.summary = this.getSummarizedAudio(d, state, xScale);
@@ -257,11 +247,13 @@ export class IntervalRenderer extends WaveShapeRenderer {
 
         // audio waveform, not interactive so only render to display canvas
         if (toHidden === false) {
+          const data = d.summary ?? [];
           renderWave(
-            d.summary ?? [],
+            data,
             height,
             Math.max(0, x),
             y,
+            Math.min(Math.floor(width), data.length),
             context,
             waveColor
           );
@@ -320,11 +312,11 @@ export function renderWave(
   height: number,
   x: number,
   y: number,
+  width: number,
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   color: string
 ) {
   const scale = height / 2;
-  const width = data.length;
   const end = x + width;
 
   const center = y + scale;
@@ -334,13 +326,13 @@ export function renderWave(
 
   region.moveTo(x, center);
   for (let i = 0; i < width; i++) {
-    region.lineTo(i + x, data[i][0] * scale + center);
+    region.lineTo(i + x, Math.ceil(data[i][0] * scale + center));
   }
   region.lineTo(end, center);
 
   region.moveTo(x, center);
   for (let i = 0; i < width; i++) {
-    region.lineTo(i + x, data[i][1] * scale + center);
+    region.lineTo(i + x, Math.ceil(data[i][1] * scale + center));
   }
   region.lineTo(end, center);
   region.closePath();

@@ -77,9 +77,11 @@ export class WaveShaper {
   #yScale: d3.ScaleBand<string>;
 
   #hiddenCanvas: OffscreenCanvas;
+  #hiddenCanvasDraw: OffscreenCanvas;
 
   // canvas contexts
   #ctxHidden: OffscreenCanvasRenderingContext2D;
+  #ctxHiddenDraw: OffscreenCanvasRenderingContext2D;
   #ctx: CanvasRenderingContext2D;
 
   #typeRoots = new Map<string, d3.Selection<HTMLElement, any, any, any>>();
@@ -112,8 +114,10 @@ export class WaveShaper {
     canvas.style.height = `${height}px`;
 
     this.#hiddenCanvas = new OffscreenCanvas(this.#width, this.#height);
+    this.#hiddenCanvasDraw = new OffscreenCanvas(this.#width, this.#height);
 
     this.#ctx = this.canvas.getContext("2d")!;
+    this.#ctxHiddenDraw = this.#hiddenCanvasDraw.getContext("2d")!;
     this.#ctxHidden = this.#hiddenCanvas.getContext("2d", {
       willReadFrequently: true,
     })!;
@@ -207,7 +211,7 @@ export class WaveShaper {
         throw new Error(`Type not registered: ${register.TYPE}`);
       }
 
-      const context = toHidden ? this.#ctxHidden : this.#ctx;
+      const context = toHidden ? this.#ctxHidden : this.#ctxHiddenDraw;
 
       register.render(rootSelection, context, toHidden);
     });
@@ -235,8 +239,11 @@ export class WaveShaper {
   }
 
   redraw() {
+    this.#ctxHiddenDraw.clearRect(0, 0, this.#width, this.#height);
     this.#ctx.clearRect(0, 0, this.#width, this.#height);
+
     this.#ee.emit("render");
+    this.#ctx.drawImage(this.#hiddenCanvasDraw, 0, 0);
   }
 
   redrawHidden() {
