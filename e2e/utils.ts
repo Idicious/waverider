@@ -105,6 +105,14 @@ export async function drag(page: Page, start: Location, end: Location) {
   await page.mouse.up();
 }
 
+export async function pan(page: Page, start: Location, end: Location) {
+  await page.keyboard.down("ControlOrMeta");
+
+  await drag(page, start, end);
+
+  await page.keyboard.up("ControlOrMeta");
+}
+
 export async function moveInterval(
   page: Page,
   interval: Interval,

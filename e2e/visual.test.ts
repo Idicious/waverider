@@ -7,6 +7,7 @@ import {
   zoom,
   getState,
   cutInterval,
+  pan,
 } from "./utils";
 
 test("basic", async ({ page }) => {
@@ -35,6 +36,19 @@ test("drag to other track", async ({ page }) => {
     page,
     { track: "1", time: xScale.invert(5) },
     { track: "2", time: xScale.invert(200) }
+  );
+
+  await expectScreenshot(page);
+});
+
+test("pan", async ({ page }) => {
+  await loadPage(page);
+  const { xScale } = await getScales(page);
+
+  await pan(
+    page,
+    { track: "1", time: xScale.invert(150) },
+    { track: "1", time: xScale.invert(100) }
   );
 
   await expectScreenshot(page);
