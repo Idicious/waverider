@@ -12,18 +12,11 @@ import { ALWAYS, invertYScale } from "../utils";
 import { summarizeAudio } from "../audio";
 
 const INTERVAL_RENDERER_TYPE = "interval";
-const INTERVAL_TYPE = "interval";
-const RESIZE_LEFT_TYPE = "resize-left";
-const RESIZE_RIGHT_TYPE = "resize-right";
+export const INTERVAL_TYPE = "interval";
+export const RESIZE_LEFT_TYPE = "resize-left";
+export const RESIZE_RIGHT_TYPE = "resize-right";
 const RESIZE_HANDLE_WIDTH = 5;
 const DEFAULT_COLOR = "steelblue";
-
-const MOUSE_CURSOR = {
-  [INTERVAL_TYPE]: "move",
-  [RESIZE_LEFT_TYPE]: "ew-resize",
-  [RESIZE_RIGHT_TYPE]: "ew-resize",
-  default: "default",
-} as Record<string, string>;
 
 /**
  * The interval renderer is responsible for rendering the audio intervals on the canvas.
@@ -45,7 +38,6 @@ export class IntervalRenderer extends WaveShapeRenderer {
   constructor(
     private readonly bindFn: (data: Interval, type: string) => string,
     private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
-    private readonly canvas: HTMLCanvasElement,
     private readonly width: number,
     private colorMap: Map<string, string>
   ) {
@@ -124,16 +116,6 @@ export class IntervalRenderer extends WaveShapeRenderer {
         this.cutInterval(e, d.data, xScale);
         break;
     }
-  }
-
-  onMouseOver(
-    _: MouseEvent,
-    d: BoundData<Interval> | undefined,
-    xScale: d3.ScaleLinear<number, number, never>,
-    yScale: d3.ScaleBand<string>
-  ) {
-    const cursor = MOUSE_CURSOR[d?.type ?? "default"];
-    this.canvas.style.cursor = cursor ?? "default";
   }
 
   summarizeAudio(

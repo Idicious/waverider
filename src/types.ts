@@ -79,57 +79,57 @@ export interface BindData {
 export abstract class WaveShapeRenderer {
   abstract TYPE: string;
 
-  abstract bind(
+  bind(
     selection: d3.Selection<any, any, any, any>,
     state: WaveShaperState,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
-  ): void;
+  ): void {}
 
-  abstract render(
+  render(
     selection: d3.Selection<any, any, any, any>,
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     toHidden: boolean
-  ): void;
+  ): void {}
 
-  abstract onStateUpdate(state: WaveShaperState): void;
+  onStateUpdate(state: WaveShaperState): void {}
 
-  abstract onDrag(
+  onDrag(
     e: d3.D3DragEvent<any, any, any>,
     d: BoundData,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
-  ): void | BindData;
+  ): void | BindData {}
 
-  abstract onDragStart(
+  onDragStart(
     e: d3.D3DragEvent<any, any, any>,
     d: BoundData<any>,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
-  ): void | BindData;
+  ): void | BindData {}
 
-  abstract onDragEnd(
+  onDragEnd(
     e: d3.D3DragEvent<any, any, any>,
     d: BoundData,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
-  ): void | BindData;
+  ): void | BindData {}
 
-  abstract onClick(
+  onClick(
     e: MouseEvent,
     d: BoundData,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
-  ): void | BindData;
+  ): void | BindData {}
 
-  abstract onMouseOver(
+  onMouseOver(
     e: MouseEvent,
     d: BoundData | undefined,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
-  ): void | BindData;
+  ): void | BindData {}
 
-  abstract onZoom(e: d3.D3ZoomEvent<any, any>): void;
+  onZoom(e: d3.D3ZoomEvent<any, any>): void {}
 }
 
 export type Predicate = (...args: any[]) => boolean;

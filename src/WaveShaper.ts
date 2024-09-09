@@ -14,6 +14,7 @@ import type {
   WaveShaperState,
   ZoomFn,
 } from "./types";
+import { CursorRenderer } from "./renderers/cursor";
 
 export const DEFAULT_TIME_DOMAIN = [0, 30000];
 export const TRACK_HEIGHT = 200;
@@ -162,11 +163,12 @@ export class WaveShaper {
       new IntervalRenderer(
         this.bindData.bind(this),
         this.updateState.bind(this),
-        this.canvas,
         width,
         new Map(this.state.tracks.map((d) => [d.id, d.color]))
       )
     );
+
+    this.registerType(new CursorRenderer(canvas));
   }
 
   getState() {
