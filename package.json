@@ -9,6 +9,7 @@
     "preview": "vite preview demo",
     "test:e2e": "playwright test"
   },
+  "type": "module",
   "keywords": [],
   "author": "",
   "license": "ISC",

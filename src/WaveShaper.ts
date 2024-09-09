@@ -174,6 +174,19 @@ export class WaveShaper {
     return state;
   }
 
+  getScaleData() {
+    return {
+      x: {
+        domain: this.#xScale.domain(),
+        range: this.#xScale.range(),
+      },
+      y: {
+        domain: this.#yScale.domain(),
+        range: this.#yScale.range(),
+      },
+    };
+  }
+
   setState(state: WaveShaperState) {
     this.state = state;
     this.#yScale.domain(d3.map(state.tracks, (d) => d.id));

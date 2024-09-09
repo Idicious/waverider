@@ -1,79 +1,62 @@
-import { test, expect } from "@playwright/test";
-import { WaveShaperState } from "src/types";
+import { expect, test } from "@playwright/test";
+import {
+  expectScreenshot,
+  getScales,
+  loadPage,
+  drag,
+  zoom,
+  getState,
+  cutInterval,
+} from "./utils";
 
 test("basic", async ({ page }) => {
-  await page.goto("http://localhost:5173");
-  const canvas = await page.$("#canvas");
-  expect(canvas).not.toBeNull();
-
-  const screenshot = await page.screenshot();
-  expect(screenshot).toMatchSnapshot();
+  await loadPage(page);
+  await expectScreenshot(page);
 });
 
 test("drag", async ({ page }) => {
-  await page.goto("http://localhost:5173");
-  const canvas = await page.$("#canvas");
-  expect(canvas).not.toBeNull();
+  await loadPage(page);
+  const { xScale } = await getScales(page);
 
-  await canvas?.hover({ position: { x: 5, y: 50 } });
-  await page.mouse.down();
-  await canvas?.hover({ position: { x: 100, y: 50 } });
-  await page.mouse.up();
+  await drag(
+    page,
+    { track: "1", time: xScale.invert(5) },
+    { track: "1", time: xScale.invert(100) }
+  );
 
-  const screenshot = await page.screenshot();
-  expect(screenshot).toMatchSnapshot();
+  await expectScreenshot(page);
 });
 
 test("drag to other track", async ({ page }) => {
-  await page.goto("http://localhost:5173");
-  const canvas = await page.$("#canvas");
-  expect(canvas).not.toBeNull();
+  await loadPage(page);
+  const { xScale } = await getScales(page);
 
-  await canvas?.hover({ position: { x: 5, y: 50 } });
-  await page.mouse.down();
-  await canvas?.hover({ position: { x: 200, y: 250 } });
-  await page.mouse.up();
+  await drag(
+    page,
+    { track: "1", time: xScale.invert(5) },
+    { track: "2", time: xScale.invert(200) }
+  );
 
-  const screenshot = await page.screenshot();
-  expect(screenshot).toMatchSnapshot();
+  await expectScreenshot(page);
 });
 
 test("zoom mouse", async ({ page }) => {
-  await page.goto("http://localhost:5173");
-  const canvas = await page.$("#canvas");
-  expect(canvas).not.toBeNull();
-
-  await page.keyboard.down("ControlOrMeta");
-  await page.mouse.wheel(0, -1000);
-  await page.keyboard.up("ControlOrMeta");
-
-  const screenshot = await page.screenshot();
-  expect(screenshot).toMatchSnapshot();
+  await loadPage(page);
+  await zoom(page, { time: 0, track: "1" }, -1000);
+  await expectScreenshot(page);
 });
 
 test("cut", async ({ page }) => {
-  await page.goto("http://localhost:5173");
-  const canvas = await page.$("#canvas");
-  expect(canvas).not.toBeNull();
+  await loadPage(page);
+  const { xScale } = await getScales(page);
 
-  let state: WaveShaperState = await page.evaluate(() => {
-    const waveShaper = (globalThis as any)["WaveShaper"];
-    return waveShaper.getState();
-  });
+  let state = await getState(page);
 
   expect(state.intervals.length).toBe(2);
+  await cutInterval(page, state.intervals[0], xScale.invert(100));
 
-  await page.keyboard.down("ControlOrMeta");
-  await canvas!.click({ button: "left", position: { x: 100, y: 50 } });
-  await page.keyboard.up("ControlOrMeta");
-
-  state = await page.evaluate(() => {
-    const waveShaper = (globalThis as any)["WaveShaper"];
-    return waveShaper.getState();
-  });
+  state = await getState(page);
 
   expect(state.intervals.length).toBe(3);
-
-  const screenshot = await page.screenshot();
-  expect(screenshot).toMatchSnapshot();
+  await expectScreenshot(page);
 });

@@ -21,6 +21,17 @@ export type AudioData = {
   data: Float32Array;
 };
 
+export interface ScaleData {
+  x: {
+    domain: [number, number];
+    range: [number, number];
+  };
+  y: {
+    domain: string[];
+    range: [number, number];
+  };
+}
+
 export interface WaveShaperState {
   intervals: Interval[];
   tracks: Track[];
