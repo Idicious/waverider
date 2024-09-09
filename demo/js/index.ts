@@ -1,28 +1,31 @@
 import { WaveShaper } from "../../src";
-import { audioFiles, intervalData, trackData } from "./data";
 import { DataLoader } from "./data-loader";
+import type ApiResponse from "../data/session.json";
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-const htmlElement = document.getElementById("root") as HTMLElement;
 
 (async function main() {
   const dataLoader = new DataLoader();
   const ctx = new AudioContext();
 
-  const audioData = await dataLoader.load(audioFiles, ctx);
+  const { configuration, intervals, tracks, audio }: typeof ApiResponse =
+    await fetch("data/session.json").then((res) => res.json());
+
+  const audioData = await dataLoader.load(audio, ctx);
 
   const waveShaper = new WaveShaper(
-    document.body.clientWidth,
-    document.body.clientHeight,
-    200,
+    configuration.width,
+    configuration.height,
+    configuration.trackHeight,
     canvas,
     {
-      intervals: intervalData,
-      tracks: trackData,
-      colorMap: new Map(trackData.map((d) => [d.id, d.color])),
+      intervals,
+      tracks,
       audioData,
     }
   );
+
+  (globalThis as any)["WaveShaper"] = waveShaper;
 
   waveShaper.process();
   waveShaper.run();

@@ -1,0 +1,41 @@
+{
+  "configuration": {
+    "trackHeight": 200,
+    "width": 1000,
+    "height": 500
+  },
+  "tracks": [
+    { "id": "1", "name": "Kick", "color": "red" },
+    { "id": "2", "name": "Snare", "color": "teal" }
+  ],
+  "intervals": [
+    {
+      "start": 0,
+      "offsetStart": 0,
+      "end": 19000,
+      "index": 0,
+      "id": "1",
+      "track": "1",
+      "data": "1"
+    },
+    {
+      "start": 0,
+      "offsetStart": 0,
+      "end": 19000,
+      "index": 0,
+      "id": "2",
+      "track": "2",
+      "data": "2"
+    }
+  ],
+  "audio": [
+    {
+      "id": "1",
+      "url": "audio/kick.wav"
+    },
+    {
+      "id": "2",
+      "url": "audio/snare.wav"
+    }
+  ]
+}
