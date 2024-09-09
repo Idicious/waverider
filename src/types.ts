@@ -1,6 +1,6 @@
 import * as d3 from "d3";
 
-export interface Interval {
+export type Interval = {
   id: string;
   start: number;
   offsetStart: number;
@@ -8,24 +8,22 @@ export interface Interval {
   index: number;
   track: string;
   data: string;
-  summary?: [number, number][];
-}
+};
 
-export interface Track {
+export type Track = {
   id: string;
   name: string;
   color: string;
-}
+};
 
-export interface AudioData {
+export type AudioData = {
   id: string;
   data: Float32Array;
-}
+};
 
 export interface WaveShaperState {
   intervals: Interval[];
   tracks: Track[];
-  colorMap: Map<string, string>;
   audioData: AudioData[];
 }
 
@@ -49,6 +47,8 @@ export type MouseOverFn<TItem> = (
   xScale: d3.ScaleLinear<number, number>,
   yScale: d3.ScaleBand<string>
 ) => void | BindData;
+
+export type StateUpdateFn = (state: WaveShaperState) => void;
 
 export type ZoomFn = (e: d3.D3ZoomEvent<any, any>) => void;
 
@@ -80,6 +80,8 @@ export abstract class WaveShapeRenderer {
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     toHidden: boolean
   ): void;
+
+  abstract onStateUpdate(state: WaveShaperState): void;
 
   abstract onDrag(
     e: d3.D3DragEvent<any, any, any>,

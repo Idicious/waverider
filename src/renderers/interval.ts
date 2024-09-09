@@ -34,6 +34,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
   TYPE = INTERVAL_RENDERER_TYPE;
 
   #filterFn: Predicate = ALWAYS;
+  #drawDataCache = new Map<string, [number, number][]>();
   #bindFilter = { type: this.TYPE } as const;
   #zoomFactor = 1;
 
@@ -45,13 +46,18 @@ export class IntervalRenderer extends WaveShapeRenderer {
     private readonly bindFn: (data: Interval, type: string) => string,
     private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
     private readonly canvas: HTMLCanvasElement,
-    private readonly width: number
+    private readonly width: number,
+    private colorMap: Map<string, string>
   ) {
     super();
   }
 
   onZoom(e: d3.D3ZoomEvent<any, any>) {
     this.#zoomFactor = e.transform.k;
+  }
+
+  onStateUpdate(state: WaveShaperState) {
+    this.colorMap = new Map(state.tracks.map((d) => [d.id, d.color]));
   }
 
   onDrag(
@@ -130,7 +136,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
     this.canvas.style.cursor = cursor ?? "default";
   }
 
-  getSummarizedAudio(
+  summarizeAudio(
     interval: Interval,
     state: WaveShaperState,
     xScale: d3.ScaleLinear<number, number>
@@ -149,16 +155,21 @@ export class IntervalRenderer extends WaveShapeRenderer {
     const audioData = state.audioData.find((a) => a.id === interval.data);
 
     // Interval is not in viewport, render nothing
-    if (intervalScreenDuration <= 0 || audioData === undefined) return [];
-
-    return summarizeAudio(
-      audioData.data,
-      interval.id,
-      msIntoInterval + interval.offsetStart,
-      intervalScreenDuration,
-      samplesPerPixel,
-      this.#zoomFactor
-    );
+    if (intervalScreenDuration <= 0 || audioData === undefined) {
+      this.#drawDataCache.set(interval.id, []);
+    } else {
+      this.#drawDataCache.set(
+        interval.id,
+        summarizeAudio(
+          audioData.data,
+          interval.id,
+          msIntoInterval + interval.offsetStart,
+          intervalScreenDuration,
+          samplesPerPixel,
+          this.#zoomFactor
+        )
+      );
+    }
   }
 
   bind(
@@ -179,11 +190,9 @@ export class IntervalRenderer extends WaveShapeRenderer {
             .attr("y", (d) => yScale(d.track)!)
             .attr("width", (d) => getIntervalWidth(d, xScale))
             .attr("height", yScale.bandwidth())
-            .attr("fill", (d) => state.colorMap.get(d.track) ?? DEFAULT_COLOR)
+            .attr("fill", (d) => this.colorMap.get(d.track) ?? DEFAULT_COLOR)
             .attr(BIND_ATTR, (d) => this.bindFn(d, INTERVAL_TYPE))
-            .each((d) => {
-              d.summary = this.getSummarizedAudio(d, state, xScale);
-            });
+            .each((d) => this.summarizeAudio(d, state, xScale));
 
           container
             .append("custom")
@@ -202,11 +211,9 @@ export class IntervalRenderer extends WaveShapeRenderer {
             .filter(this.#filterFn)
             .attr("x", (d) => xScale(actualStart(d)))
             .attr("y", (d) => yScale(d.track)!)
-            .attr("fill", (d) => state.colorMap.get(d.track) ?? DEFAULT_COLOR)
+            .attr("fill", (d) => this.colorMap.get(d.track) ?? DEFAULT_COLOR)
             .attr("width", (d) => getIntervalWidth(d, xScale))
-            .each((d) => {
-              d.summary = this.getSummarizedAudio(d, state, xScale);
-            });
+            .each((d) => this.summarizeAudio(d, state, xScale));
 
           return update;
         },
@@ -220,6 +227,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
     context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     toHidden: boolean
   ) {
+    const that = this;
     return selection
       .selectAll<any, Interval>(`custom.${this.TYPE}`)
       .each(function (d) {
@@ -247,7 +255,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
 
         // audio waveform, not interactive so only render to display canvas
         if (toHidden === false) {
-          const data = d.summary ?? [];
+          const data = that.#drawDataCache.get(d.id) ?? [];
           renderWave(
             data,
             height,

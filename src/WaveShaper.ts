@@ -8,6 +8,7 @@ import type {
   ClickFn,
   DragFn,
   MouseOverFn,
+  StateUpdateFn,
   UpdateFn,
   WaveShapeRenderer,
   WaveShaperState,
@@ -91,6 +92,7 @@ export class WaveShaper {
   #onDragEnd: Array<DragFn<any>> = [];
   #onClick: Array<ClickFn<any>> = [];
   #onMouseOver: Array<MouseOverFn<any>> = [];
+  #onStateUpdate: Array<StateUpdateFn> = [];
   #onZoom: Array<ZoomFn> = [];
   #dragData: BoundData | null = null;
   #width: number;
@@ -161,9 +163,24 @@ export class WaveShaper {
         this.bindData.bind(this),
         this.updateState.bind(this),
         this.canvas,
-        width
+        width,
+        new Map(this.state.tracks.map((d) => [d.id, d.color]))
       )
     );
+  }
+
+  getState() {
+    const { audioData, ...state } = this.state;
+    return state;
+  }
+
+  setState(state: WaveShaperState) {
+    this.state = state;
+    this.#yScale.domain(d3.map(state.tracks, (d) => d.id));
+    this.#ee.emit("bind");
+    this.redrawHidden();
+
+    this.#onStateUpdate.forEach((fn) => fn(this.state));
   }
 
   updateState(fn: UpdateFn<WaveShaperState>) {
@@ -186,6 +203,7 @@ export class WaveShaper {
     this.#onClick.push(register.onClick.bind(register));
     this.#onMouseOver.push(register.onMouseOver.bind(register));
     this.#onZoom.push(register.onZoom.bind(register));
+    this.#onStateUpdate.push(register.onStateUpdate.bind(register));
 
     const rootElement = document.createElement("custom");
     const rootSelection = d3.select(rootElement);
