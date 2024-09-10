@@ -2,7 +2,7 @@ import { BindData, BoundData, Renderer } from "../types";
 import { TYPES as AutomationTypes } from "./automation";
 import { TYPES as IntervalTypes } from "./interval";
 
-const DEFAULT = Symbol.for("default");
+const DEFAULT = Symbol.for("default-cursor") as symbol;
 const MOUSE_CURSOR = {
   [AutomationTypes.AUTOMATION_HANDLE]: "move",
   [IntervalTypes.INTERVAL]: "move",
