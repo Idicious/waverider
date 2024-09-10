@@ -1,6 +1,6 @@
 import * as d3 from "d3";
 import {
-  WaveShapeRenderer,
+  Renderer,
   Interval,
   WaveShaperState,
   UpdateFn,
@@ -28,7 +28,7 @@ const DEFAULT_COLOR = "steelblue";
  * These are segments of audio when can be dragged, resized, cut and moved around within the same horizontal plane which represents a track,
  * as well as across different tracks.
  */
-export class IntervalRenderer extends WaveShapeRenderer {
+export class IntervalRenderer implements Renderer {
   TYPE = TYPES.ROOT;
 
   #filterFn: Predicate = ALWAYS;
@@ -45,9 +45,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
     private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
     private readonly width: number,
     private colorMap: Map<string, string>
-  ) {
-    super();
-  }
+  ) {}
 
   onZoom(e: d3.D3ZoomEvent<any, any>) {
     this.#zoomFactor = e.transform.k;

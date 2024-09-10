@@ -1,4 +1,4 @@
-import { BindData, BoundData, WaveShapeRenderer } from "../types";
+import { BindData, BoundData, Renderer } from "../types";
 import { TYPES as AutomationTypes } from "./automation";
 import { TYPES as IntervalTypes } from "./interval";
 
@@ -16,17 +16,12 @@ export const TYPES = {
   ROOT: "cursors",
 } as const;
 
-export class CursorRenderer extends WaveShapeRenderer {
+export class CursorRenderer implements Renderer {
   TYPE = TYPES.ROOT;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
-    super();
-  }
+  constructor(private readonly canvas: HTMLCanvasElement) {}
 
-  override onMouseOver(
-    _: MouseEvent,
-    d: BoundData | undefined
-  ): void | BindData {
+  onMouseOver(_: MouseEvent, d: BoundData | undefined): void | BindData {
     const cursor = MOUSE_CURSOR[d?.type ?? "default"];
     this.canvas.style.cursor = cursor ?? "default";
   }

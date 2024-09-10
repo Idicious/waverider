@@ -10,7 +10,7 @@ import type {
   MouseOverFn,
   StateUpdateFn,
   UpdateFn,
-  WaveShapeRenderer,
+  Renderer,
   WaveShaperState,
   ZoomFn,
 } from "./types";
@@ -159,7 +159,7 @@ export class WaveShaper {
         });
       });
 
-    this.registerType(
+    this.registerRenderer(
       new IntervalRenderer(
         this.bindData.bind(this),
         this.updateState.bind(this),
@@ -168,7 +168,7 @@ export class WaveShaper {
       )
     );
 
-    this.registerType(new CursorRenderer(canvas));
+    this.registerRenderer(new CursorRenderer(canvas));
   }
 
   getState() {
@@ -208,46 +208,61 @@ export class WaveShaper {
     cb?.();
   }
 
-  registerType<T extends WaveShapeRenderer>(register: T) {
+  registerRenderer<T extends Renderer>(register: T) {
     if (this.#typeRoots.has(register.TYPE))
       throw new Error(`Type already registered: ${register.TYPE}`);
 
-    this.#onDrag.push(register.onDrag.bind(register));
-    this.#onDragStart.push(register.onDragStart.bind(register));
-    this.#onDragEnd.push(register.onDragEnd.bind(register));
-    this.#onClick.push(register.onClick.bind(register));
-    this.#onMouseOver.push(register.onMouseOver.bind(register));
-    this.#onZoom.push(register.onZoom.bind(register));
-    this.#onStateUpdate.push(register.onStateUpdate.bind(register));
+    if (
+      (register.render && !register.bind) ||
+      (!register.render && register.bind)
+    ) {
+      throw new Error(
+        `Renderer must implement both bind and render methods or neither`
+      );
+    }
 
-    const rootElement = document.createElement("custom");
-    const rootSelection = d3.select(rootElement);
+    register.onDrag && this.#onDrag.push(register.onDrag.bind(register));
+    register.onDragStart &&
+      this.#onDragStart.push(register.onDragStart.bind(register));
+    register.onDragEnd &&
+      this.#onDragEnd.push(register.onDragEnd.bind(register));
+    register.onClick && this.#onClick.push(register.onClick.bind(register));
+    register.onMouseOver &&
+      this.#onMouseOver.push(register.onMouseOver.bind(register));
+    register.onZoom && this.#onZoom.push(register.onZoom.bind(register));
+    register.onStateUpdate &&
+      this.#onStateUpdate.push(register.onStateUpdate.bind(register));
 
-    this.#typeRoots.set(register.TYPE, rootSelection);
+    if (register.bind && register.render) {
+      const rootElement = document.createElement("custom");
+      const rootSelection = d3.select(rootElement);
 
-    this.#ee.on("bind", (data?: BindData) => {
-      if (data?.type && data.type !== register.TYPE) return;
+      this.#typeRoots.set(register.TYPE, rootSelection);
 
-      const root = this.#typeRoots.get(register.TYPE);
+      this.#ee.on("bind", (data?: BindData) => {
+        if (data?.type && data.type !== register.TYPE) return;
 
-      if (root == null) {
-        throw new Error(`Type not registered: ${register.TYPE}`);
-      }
+        const root = this.#typeRoots.get(register.TYPE);
 
-      register.bind(root, this.state, this.#xScale, this.#yScale);
-    });
+        if (root == null) {
+          throw new Error(`Type not registered: ${register.TYPE}`);
+        }
 
-    this.#ee.on("render", (toHidden = false) => {
-      const rootSelection = this.#typeRoots.get(register.TYPE);
+        register.bind!(root, this.state, this.#xScale, this.#yScale);
+      });
 
-      if (rootSelection == null) {
-        throw new Error(`Type not registered: ${register.TYPE}`);
-      }
+      this.#ee.on("render", (toHidden = false) => {
+        const rootSelection = this.#typeRoots.get(register.TYPE);
 
-      const context = toHidden ? this.#ctxHidden : this.#ctxHiddenDraw;
+        if (rootSelection == null) {
+          throw new Error(`Type not registered: ${register.TYPE}`);
+        }
 
-      register.render(rootSelection, context, toHidden);
-    });
+        const context = toHidden ? this.#ctxHidden : this.#ctxHiddenDraw;
+
+        register.render!(rootSelection, context, toHidden);
+      });
+    }
   }
 
   bindData(data: unknown, type: string) {
