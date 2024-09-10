@@ -73,16 +73,16 @@ export type UpdateFn<T extends WaveShaperState> = (
 ) => [T, BindData | undefined, (() => void) | undefined];
 
 export interface BoundData<T = any> {
-  type: string;
+  type: symbol;
   data: T;
 }
 
 export interface BindData {
-  type: string;
+  type: symbol;
 }
 
 export type Renderer = {
-  TYPE: string;
+  TYPE: symbol;
 
   bind?: (
     selection: d3.Selection<any, any, any, any>,

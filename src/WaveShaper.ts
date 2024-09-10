@@ -86,8 +86,8 @@ export class WaveShaper {
   #ctxHiddenDraw: OffscreenCanvasRenderingContext2D;
   #ctx: CanvasRenderingContext2D;
 
-  #typeRoots = new Map<string, d3.Selection<HTMLElement, any, any, any>>();
-  #bindMap = new Map<number, { type: string; data: unknown }>();
+  #typeRoots = new Map<symbol, d3.Selection<HTMLElement, any, any, any>>();
+  #bindMap = new Map<number, { type: symbol; data: unknown }>();
   #onDrag: Array<DragFn<any>> = [];
   #onDragStart: Array<DragFn<any>> = [];
   #onDragEnd: Array<DragFn<any>> = [];
@@ -210,7 +210,7 @@ export class WaveShaper {
 
   registerRenderer<T extends Renderer>(register: T) {
     if (this.#typeRoots.has(register.TYPE))
-      throw new Error(`Type already registered: ${register.TYPE}`);
+      throw new Error(`Type already registered: ${register.TYPE.description}`);
 
     if (
       (register.render && !register.bind) ||
@@ -245,7 +245,7 @@ export class WaveShaper {
         const root = this.#typeRoots.get(register.TYPE);
 
         if (root == null) {
-          throw new Error(`Type not registered: ${register.TYPE}`);
+          throw new Error(`Type not registered: ${register.TYPE.description}`);
         }
 
         register.bind!(root, this.state, this.#xScale, this.#yScale);
@@ -255,7 +255,7 @@ export class WaveShaper {
         const rootSelection = this.#typeRoots.get(register.TYPE);
 
         if (rootSelection == null) {
-          throw new Error(`Type not registered: ${register.TYPE}`);
+          throw new Error(`Type not registered: ${register.TYPE.description}`);
         }
 
         const context = toHidden ? this.#ctxHidden : this.#ctxHiddenDraw;
@@ -265,7 +265,7 @@ export class WaveShaper {
     }
   }
 
-  bindData(data: unknown, type: string) {
+  bindData(data: unknown, type: symbol) {
     const color = genColor();
     this.#bindMap.set(color, { type, data });
     return numberToRGBString(color);

@@ -2,6 +2,7 @@ import { BindData, BoundData, Renderer } from "../types";
 import { TYPES as AutomationTypes } from "./automation";
 import { TYPES as IntervalTypes } from "./interval";
 
+const DEFAULT = Symbol.for("default");
 const MOUSE_CURSOR = {
   [AutomationTypes.AUTOMATION_HANDLE]: "move",
   [IntervalTypes.INTERVAL]: "move",
@@ -9,20 +10,16 @@ const MOUSE_CURSOR = {
   [IntervalTypes.RESIZE_RIGHT]: "ew-resize",
   [IntervalTypes.FADE_IN]: "col-resize",
   [IntervalTypes.FADE_OUT]: "col-resize",
-  default: "default",
-} as Record<string, string>;
-
-export const TYPES = {
-  ROOT: "cursors",
+  [DEFAULT]: "default",
 } as const;
 
 export class CursorRenderer implements Renderer {
-  TYPE = TYPES.ROOT;
+  TYPE = Symbol.for("cursors");
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
 
   onMouseOver(_: MouseEvent, d: BoundData | undefined): void | BindData {
-    const cursor = MOUSE_CURSOR[d?.type ?? "default"];
+    const cursor = MOUSE_CURSOR[d?.type ?? DEFAULT];
     this.canvas.style.cursor = cursor ?? "default";
   }
 }

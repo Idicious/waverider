@@ -12,12 +12,11 @@ import { ALWAYS, invertYScale } from "../utils";
 import { summarizeAudio } from "../audio";
 
 export const TYPES = {
-  ROOT: "intervals",
-  INTERVAL: "interval",
-  RESIZE_LEFT: "resize-left",
-  RESIZE_RIGHT: "resize-right",
-  FADE_IN: "fade-in",
-  FADE_OUT: "fade-out",
+  INTERVAL: Symbol.for("interval"),
+  RESIZE_LEFT: Symbol.for("resize-left"),
+  RESIZE_RIGHT: Symbol.for("resize-right"),
+  FADE_IN: Symbol.for("fade-in"),
+  FADE_OUT: Symbol.for("fade-out"),
 } as const;
 
 const RESIZE_HANDLE_WIDTH = 5;
@@ -29,7 +28,7 @@ const DEFAULT_COLOR = "steelblue";
  * as well as across different tracks.
  */
 export class IntervalRenderer implements Renderer {
-  TYPE = TYPES.ROOT;
+  TYPE = Symbol.for("intervals");
 
   #filterFn: Predicate = ALWAYS;
   #drawDataCache = new Map<string, [number, number][]>();
@@ -41,7 +40,7 @@ export class IntervalRenderer implements Renderer {
   };
 
   constructor(
-    private readonly bindFn: (data: Interval, type: string) => string,
+    private readonly bindFn: (data: Interval, type: symbol) => string,
     private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
     private readonly width: number,
     private colorMap: Map<string, string>
@@ -176,13 +175,13 @@ export class IntervalRenderer implements Renderer {
     yScale: d3.ScaleBand<string>
   ) {
     return selection
-      .selectAll<any, Interval>(`custom.${TYPES.INTERVAL}`)
+      .selectAll<any, Interval>(`custom.${TYPES.INTERVAL.description}`)
       .data(state.intervals, (d) => d.id)
       .join(
         (enter) => {
           const container = enter
             .append("custom")
-            .attr("class", TYPES.INTERVAL)
+            .attr("class", TYPES.INTERVAL.description!)
             .attr("x", (d) => xScale(actualStart(d)))
             .attr("y", (d) => yScale(d.track)!)
             .attr("width", (d) => getIntervalWidth(d, xScale))
@@ -193,23 +192,23 @@ export class IntervalRenderer implements Renderer {
 
           container
             .append("custom")
-            .attr("class", TYPES.RESIZE_LEFT)
+            .attr("class", TYPES.RESIZE_LEFT.description!)
             .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.RESIZE_LEFT));
 
           container
             .append("custom")
-            .attr("class", TYPES.RESIZE_RIGHT)
+            .attr("class", TYPES.RESIZE_RIGHT.description!)
             .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.RESIZE_RIGHT));
 
           container
             .append("custom")
-            .attr("class", TYPES.FADE_IN)
+            .attr("class", TYPES.FADE_IN.description!)
             .attr("x", (d) => xScale(actualStart(d) + (d.fadeIn ?? 0)))
             .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.FADE_IN));
 
           container
             .append("custom")
-            .attr("class", TYPES.FADE_OUT)
+            .attr("class", TYPES.FADE_OUT.description!)
             .attr("x", (d) => xScale(d.end - (d.fadeOut ?? 0)))
             .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.FADE_OUT));
 
@@ -226,11 +225,11 @@ export class IntervalRenderer implements Renderer {
             .each((d) => this.summarizeAudio(d, state, xScale));
 
           toUpdate
-            .select(`custom.${TYPES.FADE_IN}`)
+            .select(`custom.${TYPES.FADE_IN.description!}`)
             .attr("x", (d) => xScale(actualStart(d) + (d.fadeIn ?? 0)));
 
           toUpdate
-            .select(`custom.${TYPES.FADE_OUT}`)
+            .select(`custom.${TYPES.FADE_OUT.description!}`)
             .attr("x", (d) => xScale(d.end - (d.fadeOut ?? 0)));
 
           return update;
@@ -247,13 +246,17 @@ export class IntervalRenderer implements Renderer {
   ) {
     const that = this;
     return selection
-      .selectAll<any, Interval>(`custom.${TYPES.INTERVAL}`)
+      .selectAll<any, Interval>(`custom.${TYPES.INTERVAL.description!}`)
       .each(function (d) {
         const node = d3.select(this);
-        const resizeLeft = node.select(`custom.${TYPES.RESIZE_LEFT}`);
-        const resizeRight = node.select(`custom.${TYPES.RESIZE_RIGHT}`);
-        const fadeIn = node.select(`custom.${TYPES.FADE_IN}`);
-        const fadeOut = node.select(`custom.${TYPES.FADE_OUT}`);
+        const resizeLeft = node.select(
+          `custom.${TYPES.RESIZE_LEFT.description!}`
+        );
+        const resizeRight = node.select(
+          `custom.${TYPES.RESIZE_RIGHT.description!}`
+        );
+        const fadeIn = node.select(`custom.${TYPES.FADE_IN.description!}`);
+        const fadeOut = node.select(`custom.${TYPES.FADE_OUT.description!}`);
 
         const fillUniqueColor = node.attr(BIND_ATTR);
         const resizeLeftUniqueColor = resizeLeft.attr(BIND_ATTR);
