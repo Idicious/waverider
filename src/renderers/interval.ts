@@ -342,13 +342,14 @@ export class IntervalRenderer extends WaveShapeRenderer {
         track: data.track,
         data: data.data,
         fadeIn: 0,
-        fadeOut: data.fadeOut,
+        fadeOut: Math.min(data.fadeOut, data.end - timeCut),
         id: crypto.randomUUID(),
       };
 
       // update existing interval
       data.end = timeCut;
       data.fadeOut = 0;
+      data.fadeIn = Math.min(data.fadeIn, timeCut - data.start);
 
       this.#filterFn = (i: Interval) => i.id === data.id;
       this.updateState((state) => {
