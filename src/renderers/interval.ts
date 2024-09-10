@@ -11,10 +11,15 @@ import { BIND_ATTR } from "../bind";
 import { ALWAYS, invertYScale } from "../utils";
 import { summarizeAudio } from "../audio";
 
-const INTERVAL_RENDERER_TYPE = "interval";
-export const INTERVAL_TYPE = "interval";
-export const RESIZE_LEFT_TYPE = "resize-left";
-export const RESIZE_RIGHT_TYPE = "resize-right";
+export const TYPES = {
+  ROOT: "intervals",
+  INTERVAL: "interval",
+  RESIZE_LEFT: "resize-left",
+  RESIZE_RIGHT: "resize-right",
+  FADE_IN: "fade-in",
+  FADE_OUT: "fade-out",
+} as const;
+
 const RESIZE_HANDLE_WIDTH = 5;
 const DEFAULT_COLOR = "steelblue";
 
@@ -24,7 +29,7 @@ const DEFAULT_COLOR = "steelblue";
  * as well as across different tracks.
  */
 export class IntervalRenderer extends WaveShapeRenderer {
-  TYPE = INTERVAL_RENDERER_TYPE;
+  TYPE = TYPES.ROOT;
 
   #filterFn: Predicate = ALWAYS;
   #drawDataCache = new Map<string, [number, number][]>();
@@ -59,16 +64,24 @@ export class IntervalRenderer extends WaveShapeRenderer {
     yScale: d3.ScaleBand<string>
   ) {
     switch (d.type) {
-      case INTERVAL_TYPE: {
+      case TYPES.INTERVAL: {
         dragInterval(e, d.data, xScale, yScale);
         break;
       }
-      case RESIZE_LEFT_TYPE: {
+      case TYPES.RESIZE_LEFT: {
         resizeLeft(e, d.data, xScale, yScale);
         break;
       }
-      case RESIZE_RIGHT_TYPE: {
+      case TYPES.RESIZE_RIGHT: {
         resizeRight(e, d.data, xScale, yScale);
+        break;
+      }
+      case TYPES.FADE_IN: {
+        fadeIn(e, d.data, xScale);
+        break;
+      }
+      case TYPES.FADE_OUT: {
+        fadeOut(e, d.data, xScale);
         break;
       }
     }
@@ -78,9 +91,11 @@ export class IntervalRenderer extends WaveShapeRenderer {
 
   onDragStart(_: d3.D3DragEvent<any, any, any>, d: BoundData<Interval>) {
     switch (d.type) {
-      case INTERVAL_TYPE:
-      case RESIZE_LEFT_TYPE:
-      case RESIZE_RIGHT_TYPE: {
+      case TYPES.INTERVAL:
+      case TYPES.RESIZE_LEFT:
+      case TYPES.RESIZE_RIGHT:
+      case TYPES.FADE_IN:
+      case TYPES.FADE_OUT: {
         this.#filterFn = (i: Interval) => i.id === d.data.id;
         this.updateState((state) => {
           const index = d3.max(state.intervals, (i) => i.index) ?? 1;
@@ -96,9 +111,11 @@ export class IntervalRenderer extends WaveShapeRenderer {
 
   onDragEnd(_: d3.D3DragEvent<any, Interval, any>, d: BoundData<Interval>) {
     switch (d.type) {
-      case INTERVAL_TYPE:
-      case RESIZE_LEFT_TYPE:
-      case RESIZE_RIGHT_TYPE: {
+      case TYPES.INTERVAL:
+      case TYPES.RESIZE_LEFT:
+      case TYPES.RESIZE_RIGHT:
+      case TYPES.FADE_IN:
+      case TYPES.FADE_OUT: {
         this.#filterFn = ALWAYS;
         break;
       }
@@ -112,7 +129,7 @@ export class IntervalRenderer extends WaveShapeRenderer {
     yScale: d3.ScaleBand<string>
   ) {
     switch (d.type) {
-      case INTERVAL_TYPE:
+      case TYPES.INTERVAL:
         this.cutInterval(e, d.data, xScale);
         break;
     }
@@ -161,41 +178,62 @@ export class IntervalRenderer extends WaveShapeRenderer {
     yScale: d3.ScaleBand<string>
   ) {
     return selection
-      .selectAll<any, Interval>(`custom.${this.TYPE}`)
+      .selectAll<any, Interval>(`custom.${TYPES.INTERVAL}`)
       .data(state.intervals, (d) => d.id)
       .join(
         (enter) => {
           const container = enter
             .append("custom")
-            .attr("class", INTERVAL_TYPE)
+            .attr("class", TYPES.INTERVAL)
             .attr("x", (d) => xScale(actualStart(d)))
             .attr("y", (d) => yScale(d.track)!)
             .attr("width", (d) => getIntervalWidth(d, xScale))
             .attr("height", yScale.bandwidth())
             .attr("fill", (d) => this.colorMap.get(d.track) ?? DEFAULT_COLOR)
-            .attr(BIND_ATTR, (d) => this.bindFn(d, INTERVAL_TYPE))
+            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.INTERVAL))
             .each((d) => this.summarizeAudio(d, state, xScale));
 
           container
             .append("custom")
-            .attr("class", RESIZE_LEFT_TYPE)
-            .attr(BIND_ATTR, (d) => this.bindFn(d, RESIZE_LEFT_TYPE));
+            .attr("class", TYPES.RESIZE_LEFT)
+            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.RESIZE_LEFT));
 
           container
             .append("custom")
-            .attr("class", RESIZE_RIGHT_TYPE)
-            .attr(BIND_ATTR, (d) => this.bindFn(d, RESIZE_RIGHT_TYPE));
+            .attr("class", TYPES.RESIZE_RIGHT)
+            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.RESIZE_RIGHT));
+
+          container
+            .append("custom")
+            .attr("class", TYPES.FADE_IN)
+            .attr("x", (d) => xScale(actualStart(d) + (d.fadeIn ?? 0)))
+            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.FADE_IN));
+
+          container
+            .append("custom")
+            .attr("class", TYPES.FADE_OUT)
+            .attr("x", (d) => xScale(d.end - (d.fadeOut ?? 0)))
+            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.FADE_OUT));
 
           return container;
         },
         (update) => {
-          update
-            .filter(this.#filterFn)
+          const toUpdate = update.filter(this.#filterFn);
+
+          toUpdate
             .attr("x", (d) => xScale(actualStart(d)))
             .attr("y", (d) => yScale(d.track)!)
             .attr("fill", (d) => this.colorMap.get(d.track) ?? DEFAULT_COLOR)
             .attr("width", (d) => getIntervalWidth(d, xScale))
             .each((d) => this.summarizeAudio(d, state, xScale));
+
+          toUpdate
+            .select(`custom.${TYPES.FADE_IN}`)
+            .attr("x", (d) => xScale(actualStart(d) + (d.fadeIn ?? 0)));
+
+          toUpdate
+            .select(`custom.${TYPES.FADE_OUT}`)
+            .attr("x", (d) => xScale(d.end - (d.fadeOut ?? 0)));
 
           return update;
         },
@@ -211,25 +249,33 @@ export class IntervalRenderer extends WaveShapeRenderer {
   ) {
     const that = this;
     return selection
-      .selectAll<any, Interval>(`custom.${this.TYPE}`)
+      .selectAll<any, Interval>(`custom.${TYPES.INTERVAL}`)
       .each(function (d) {
         const node = d3.select(this);
-        const resizeLeft = node.select(`custom.${RESIZE_LEFT_TYPE}`);
-        const resizeRight = node.select(`custom.${RESIZE_RIGHT_TYPE}`);
+        const resizeLeft = node.select(`custom.${TYPES.RESIZE_LEFT}`);
+        const resizeRight = node.select(`custom.${TYPES.RESIZE_RIGHT}`);
+        const fadeIn = node.select(`custom.${TYPES.FADE_IN}`);
+        const fadeOut = node.select(`custom.${TYPES.FADE_OUT}`);
 
         const fillUniqueColor = node.attr(BIND_ATTR);
         const resizeLeftUniqueColor = resizeLeft.attr(BIND_ATTR);
         const resizeRightUniqueColor = resizeRight.attr(BIND_ATTR);
+        const fadeInUniqueColor = fadeIn.attr(BIND_ATTR);
+        const fadeOutUniqueColor = fadeOut.attr(BIND_ATTR);
 
         const fillColor = toHidden ? fillUniqueColor : node.attr("fill");
         const waveColor = toHidden ? fillUniqueColor : "black";
         const resizeLeftColor = toHidden ? resizeLeftUniqueColor : "black";
         const resizeRightColor = toHidden ? resizeRightUniqueColor : "black";
+        const fadeInColor = toHidden ? fadeInUniqueColor : "purple";
+        const fadeOutColor = toHidden ? fadeOutUniqueColor : "purple";
 
         const x = getDrawValue(+node.attr("x"), toHidden);
         const y = getDrawValue(+node.attr("y"), toHidden);
         const width = getDrawValue(+node.attr("width"), toHidden);
         const height = getDrawValue(+node.attr("height"), toHidden);
+        const fadeInX = getDrawValue(+fadeIn.attr("x"), toHidden);
+        const fadeOutX = getDrawValue(+fadeOut.attr("x"), toHidden);
 
         // background
         context.fillStyle = fillColor;
@@ -261,6 +307,19 @@ export class IntervalRenderer extends WaveShapeRenderer {
           RESIZE_HANDLE_WIDTH,
           height
         );
+
+        renderFades(
+          context,
+          toHidden,
+          x,
+          y,
+          width,
+          height,
+          fadeInX,
+          fadeOutX,
+          fadeInColor,
+          fadeOutColor
+        );
       });
   }
 
@@ -282,11 +341,14 @@ export class IntervalRenderer extends WaveShapeRenderer {
         index: data.index,
         track: data.track,
         data: data.data,
+        fadeIn: 0,
+        fadeOut: data.fadeOut,
         id: crypto.randomUUID(),
       };
 
       // update existing interval
       data.end = timeCut;
+      data.fadeOut = 0;
 
       this.#filterFn = (i: Interval) => i.id === data.id;
       this.updateState((state) => {
@@ -328,6 +390,69 @@ export function renderWave(
   region.closePath();
 
   ctx.fill(region);
+}
+
+function renderFades(
+  context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  toHidden: boolean,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  fadeInX: number,
+  fadeOutX: number,
+  fadeInColor: string,
+  fadeOutColor: string
+) {
+  if (toHidden === false) {
+    // background
+    context.fillStyle = "rgba(0,0,0,0.2)";
+    context.fillRect(x, y, fadeInX - x, height);
+
+    // line
+    context.beginPath();
+    context.moveTo(x, y + height);
+    context.lineTo(fadeInX, y);
+    context.closePath();
+    context.stroke();
+
+    // background
+    context.fillStyle = "rgba(0,0,0,0.2)";
+    context.fillRect(fadeOutX, y, x + width - fadeOutX, height);
+
+    // line
+    context.beginPath();
+    context.moveTo(fadeOutX, y);
+    context.lineTo(x + width, y + height);
+    context.closePath();
+    context.stroke();
+
+    context.fillStyle = fadeInColor;
+    context.beginPath();
+    context.arc(fadeInX, y, RESIZE_HANDLE_WIDTH, 0, 2 * Math.PI);
+    context.fill();
+
+    context.fillStyle = fadeOutColor;
+    context.beginPath();
+    context.arc(fadeOutX, y, RESIZE_HANDLE_WIDTH, 0, 2 * Math.PI);
+    context.fill();
+  } else {
+    context.fillStyle = fadeInColor;
+    context.fillRect(
+      fadeInX - RESIZE_HANDLE_WIDTH,
+      y - RESIZE_HANDLE_WIDTH,
+      RESIZE_HANDLE_WIDTH * 2,
+      RESIZE_HANDLE_WIDTH * 2
+    );
+
+    context.fillStyle = fadeOutColor;
+    context.fillRect(
+      fadeOutX - RESIZE_HANDLE_WIDTH,
+      y - RESIZE_HANDLE_WIDTH,
+      RESIZE_HANDLE_WIDTH * 2,
+      RESIZE_HANDLE_WIDTH * 2
+    );
+  }
 }
 
 function getIntervalWidth(d: Interval, xScale: d3.ScaleLinear<number, number>) {
@@ -400,6 +525,30 @@ function resizeRight(
   } else {
     data.end = data.end + dx;
   }
+}
+
+function fadeIn(
+  event: d3.D3DragEvent<any, Interval, any>,
+  data: Interval,
+  xScale: d3.ScaleLinear<number, number>
+) {
+  const time = Math.max(0, xScale.invert(event.x) - actualStart(data));
+  const fadeOutStart = data.end - data.start - (data.fadeOut ?? 0);
+
+  // restrict fade in to between 0 and fade out start
+  data.fadeIn = Math.max(0, Math.min(time, fadeOutStart));
+}
+
+function fadeOut(
+  event: d3.D3DragEvent<any, Interval, any>,
+  data: Interval,
+  xScale: d3.ScaleLinear<number, number>
+) {
+  const time = Math.max(0, data.end - xScale.invert(event.x));
+  const fadeInEnd = actualStart(data) + (data.fadeIn ?? 0);
+
+  // restrict fade out to between 0 and fade in end
+  data.fadeOut = Math.max(0, Math.min(time, data.end - fadeInEnd));
 }
 
 function getDrawValue(n: number, toHidden: boolean) {

@@ -1,15 +1,23 @@
 import { BindData, BoundData, WaveShapeRenderer } from "../types";
-import { INTERVAL_TYPE, RESIZE_LEFT_TYPE, RESIZE_RIGHT_TYPE } from "./interval";
+import { TYPES as AutomationTypes } from "./automation";
+import { TYPES as IntervalTypes } from "./interval";
 
 const MOUSE_CURSOR = {
-  [INTERVAL_TYPE]: "move",
-  [RESIZE_LEFT_TYPE]: "ew-resize",
-  [RESIZE_RIGHT_TYPE]: "ew-resize",
+  [AutomationTypes.AUTOMATION_HANDLE]: "move",
+  [IntervalTypes.INTERVAL]: "move",
+  [IntervalTypes.RESIZE_LEFT]: "ew-resize",
+  [IntervalTypes.RESIZE_RIGHT]: "ew-resize",
+  [IntervalTypes.FADE_IN]: "col-resize",
+  [IntervalTypes.FADE_OUT]: "col-resize",
   default: "default",
 } as Record<string, string>;
 
+export const TYPES = {
+  ROOT: "cursors",
+} as const;
+
 export class CursorRenderer extends WaveShapeRenderer {
-  TYPE = "cursor";
+  TYPE = TYPES.ROOT;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     super();

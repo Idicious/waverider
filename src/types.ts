@@ -8,6 +8,8 @@ export type Interval = {
   index: number;
   track: string;
   data: string;
+  fadeIn: number;
+  fadeOut: number;
 };
 
 export type Track = {
@@ -20,6 +22,8 @@ export type AudioData = {
   id: string;
   data: Float32Array;
 };
+
+export type Automation = {};
 
 export interface ScaleData {
   x: {
@@ -35,6 +39,7 @@ export interface ScaleData {
 export interface WaveShaperState {
   intervals: Interval[];
   tracks: Track[];
+  automation: Automation[];
   audioData: AudioData[];
 }
 

@@ -16,7 +16,9 @@
       "index": 0,
       "id": "1",
       "track": "1",
-      "data": "1"
+      "data": "1",
+      "fadeIn": 0,
+      "fadeOut": 0
     },
     {
       "start": 0,
@@ -25,7 +27,9 @@
       "index": 0,
       "id": "2",
       "track": "2",
-      "data": "2"
+      "data": "2",
+      "fadeIn": 0,
+      "fadeOut": 0
     }
   ],
   "audio": [
@@ -37,5 +41,6 @@
       "id": "2",
       "url": "audio/snare.wav"
     }
-  ]
+  ],
+  "automation": []
 }

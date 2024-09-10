@@ -8,8 +8,15 @@ const canvas = document.getElementById("canvas") as HTMLCanvasElement;
   const dataLoader = new DataLoader();
   const ctx = new AudioContext();
 
-  const { configuration, intervals, tracks, audio }: typeof ApiResponse =
-    await fetch("data/session.json").then((res) => res.json());
+  const {
+    configuration,
+    intervals,
+    tracks,
+    audio,
+    automation,
+  }: typeof ApiResponse = await fetch("data/session.json").then((res) =>
+    res.json()
+  );
 
   const audioData = await dataLoader.load(audio, ctx);
 
@@ -22,6 +29,7 @@ const canvas = document.getElementById("canvas") as HTMLCanvasElement;
       intervals,
       tracks,
       audioData,
+      automation,
     }
   );
 
