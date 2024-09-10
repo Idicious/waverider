@@ -19,6 +19,8 @@ export let intervalData: Interval[] = [
     id: crypto.randomUUID(),
     track: trackData[0].id,
     data: audioFiles[0].id,
+    fadeIn: 0,
+    fadeOut: 0,
   },
   {
     start: 0,
@@ -28,5 +30,7 @@ export let intervalData: Interval[] = [
     id: crypto.randomUUID(),
     track: trackData[1].id,
     data: audioFiles[1].id,
+    fadeIn: 0,
+    fadeOut: 0,
   },
 ];
