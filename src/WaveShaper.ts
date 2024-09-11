@@ -15,9 +15,7 @@ import type {
   ZoomFn,
 } from "./types";
 import { CursorRenderer } from "./renderers/cursor";
-
-export const DEFAULT_TIME_DOMAIN = [0, 30000];
-export const TRACK_HEIGHT = 200;
+import { getDomainInMs } from "./zoom";
 
 export class WaveShaper {
   #ee = new EventEmitter();
@@ -102,6 +100,9 @@ export class WaveShaper {
   constructor(
     width: number,
     height: number,
+    samplesPerPixel: number,
+    scrollPositionInMs: number,
+    private readonly sampleRate: number,
     private readonly trackHeight: number,
     private readonly canvas: HTMLCanvasElement,
     private state: WaveShaperState
@@ -134,7 +135,9 @@ export class WaveShaper {
 
     this.#xScaleOriginal = d3
       .scaleLinear()
-      .domain(DEFAULT_TIME_DOMAIN)
+      .domain(
+        getDomainInMs(scrollPositionInMs, samplesPerPixel, sampleRate, width)
+      )
       .range([0, width]);
     this.#xScale = this.#xScaleOriginal.copy();
 
@@ -196,6 +199,26 @@ export class WaveShaper {
     this.redrawHidden();
 
     this.#onStateUpdate.forEach((fn) => fn(this.state));
+  }
+
+  /**
+   * Zoom to given level and scroll position
+   * @param samplesPerPixel Zoom level in terms of samples per pixel
+   * @param scrollPositionInMs Left bound of the view in milliseconds
+   */
+  zoom(samplesPerPixel: number, scrollPositionInMs: number) {
+    this.#xScaleOriginal.domain(
+      getDomainInMs(
+        scrollPositionInMs,
+        samplesPerPixel,
+        this.sampleRate,
+        this.#width
+      )
+    );
+    this.#xScale = this.#xScaleOriginal.copy();
+
+    this.#ee.emit("bind");
+    this.redrawHidden();
   }
 
   updateState(fn: UpdateFn<WaveShaperState>) {

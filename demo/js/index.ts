@@ -23,6 +23,9 @@ const canvas = document.getElementById("canvas") as HTMLCanvasElement;
   const waveShaper = new WaveShaper(
     configuration.width,
     configuration.height,
+    configuration.samplesPerPixel,
+    configuration.scrollPosition,
+    ctx.sampleRate,
     configuration.trackHeight,
     canvas,
     {
