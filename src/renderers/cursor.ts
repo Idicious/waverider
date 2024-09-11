@@ -2,7 +2,7 @@ import { BindData, BoundData, Renderer } from "../types";
 import { TYPES as AutomationTypes } from "./automation";
 import { TYPES as IntervalTypes } from "./interval";
 
-const DEFAULT = Symbol.for("default-cursor") as symbol;
+const DEFAULT = Symbol("default-cursor") as symbol;
 const MOUSE_CURSOR = {
   [AutomationTypes.AUTOMATION_HANDLE]: "move",
   [IntervalTypes.INTERVAL]: "move",
@@ -14,7 +14,7 @@ const MOUSE_CURSOR = {
 } as const;
 
 export class CursorRenderer implements Renderer {
-  TYPE = Symbol.for("cursors");
+  TYPE = Symbol("cursors");
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
 

@@ -12,11 +12,11 @@ import { ALWAYS, invertYScale } from "../utils";
 import { summarizeAudio } from "../audio";
 
 export const TYPES = {
-  INTERVAL: Symbol.for("interval"),
-  RESIZE_LEFT: Symbol.for("resize-left"),
-  RESIZE_RIGHT: Symbol.for("resize-right"),
-  FADE_IN: Symbol.for("fade-in"),
-  FADE_OUT: Symbol.for("fade-out"),
+  INTERVAL: Symbol("interval"),
+  RESIZE_LEFT: Symbol("resize-left"),
+  RESIZE_RIGHT: Symbol("resize-right"),
+  FADE_IN: Symbol("fade-in"),
+  FADE_OUT: Symbol("fade-out"),
 } as const;
 
 const RESIZE_HANDLE_WIDTH = 5;
@@ -28,7 +28,7 @@ const DEFAULT_COLOR = "steelblue";
  * as well as across different tracks.
  */
 export class IntervalRenderer implements Renderer {
-  TYPE = Symbol.for("intervals");
+  TYPE = Symbol("intervals");
 
   #filterFn: Predicate = ALWAYS;
   #drawDataCache = new Map<string, [number, number][]>();
@@ -66,7 +66,7 @@ export class IntervalRenderer implements Renderer {
         break;
       }
       case TYPES.RESIZE_LEFT: {
-        resizeLeft(e, d.data, xScale, yScale);
+        resizeLeft(e, d.data, xScale);
         break;
       }
       case TYPES.RESIZE_RIGHT: {
@@ -490,8 +490,7 @@ function dragInterval(
 function resizeLeft(
   event: d3.D3DragEvent<any, Interval, any>,
   data: Interval,
-  xScale: d3.ScaleLinear<number, number>,
-  yScale: d3.ScaleBand<string>
+  xScale: d3.ScaleLinear<number, number>
 ) {
   const start = actualStart(data);
 

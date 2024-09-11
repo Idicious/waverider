@@ -3,11 +3,11 @@ import { Selection } from "d3-selection";
 import { Renderer, WaveShaperState } from "../types";
 
 export const TYPES = {
-  AUTOMATION_HANDLE: Symbol.for("automation-handle"),
+  AUTOMATION_HANDLE: Symbol("automation-handle"),
 } as const;
 
 export class AutomationRenderer implements Renderer {
-  TYPE = Symbol.for("automation");
+  TYPE = Symbol("automation");
 
   bind(
     selection: Selection<any, any, any, any>,
