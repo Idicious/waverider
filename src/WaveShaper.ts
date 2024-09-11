@@ -236,8 +236,8 @@ export class WaveShaper {
       throw new Error(`Type already registered: ${register.TYPE.description}`);
 
     if (
-      (register.render && !register.bind) ||
-      (!register.render && register.bind)
+      (register.onRender && !register.onBind) ||
+      (!register.onRender && register.onBind)
     ) {
       throw new Error(
         `Renderer must implement both bind and render methods or neither`
@@ -256,7 +256,7 @@ export class WaveShaper {
     register.onStateUpdate &&
       this.#onStateUpdate.push(register.onStateUpdate.bind(register));
 
-    if (register.bind && register.render) {
+    if (register.onBind && register.onRender) {
       const rootElement = document.createElement("custom");
       const rootSelection = d3.select(rootElement);
 
@@ -271,7 +271,7 @@ export class WaveShaper {
           throw new Error(`Type not registered: ${register.TYPE.description}`);
         }
 
-        register.bind!(root, this.state, this.#xScale, this.#yScale);
+        register.onBind!(root, this.state, this.#xScale, this.#yScale);
       });
 
       this.#ee.on("render", (toHidden = false) => {
@@ -283,7 +283,7 @@ export class WaveShaper {
 
         const context = toHidden ? this.#ctxHidden : this.#ctxHiddenDraw;
 
-        register.render!(rootSelection, context, toHidden);
+        register.onRender!(rootSelection, context, toHidden);
       });
     }
   }

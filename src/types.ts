@@ -84,14 +84,14 @@ export interface BindData {
 export type Renderer = {
   TYPE: symbol;
 
-  bind?: (
+  onBind?: (
     selection: d3.Selection<any, any, any, any>,
     state: WaveShaperState,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) => void;
 
-  render?: (
+  onRender?: (
     selection: d3.Selection<any, any, any, any>,
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     toHidden: boolean

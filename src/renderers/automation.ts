@@ -9,14 +9,14 @@ export const TYPES = {
 export class AutomationRenderer implements Renderer {
   TYPE = Symbol("automation");
 
-  bind(
+  onBind(
     selection: Selection<any, any, any, any>,
     state: WaveShaperState,
     xScale: ScaleLinear<number, number>,
     yScale: ScaleBand<string>
   ): void {}
 
-  render(
+  onRender(
     selection: Selection<any, any, any, any>,
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     toHidden: boolean

@@ -168,7 +168,7 @@ export class IntervalRenderer implements Renderer {
     }
   }
 
-  bind(
+  onBind(
     selection: d3.Selection<HTMLElement, any, any, any>,
     state: WaveShaperState,
     xScale: d3.ScaleLinear<number, number, never>,
@@ -239,7 +239,7 @@ export class IntervalRenderer implements Renderer {
       .sort((a, b) => a.index - b.index);
   }
 
-  render(
+  onRender(
     selection: d3.Selection<HTMLElement, any, any, any>,
     context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     toHidden: boolean
