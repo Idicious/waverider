@@ -55,7 +55,12 @@ export class AutomationRenderer implements Renderer {
   onDragStart(_e: d3.D3DragEvent<any, any, any>, d: BoundData<any>) {
     switch (d.type) {
       case TYPES.AUTOMATION_POINT: {
-        this.#filterFn = (data) => data.point.id === d.data.point.id;
+        this.#filterFn = (data: AutomationBindData) =>
+          data.automationData === d.data.automationData;
+        break;
+      }
+      case TYPES.AUTOMATION: {
+        this.#filterFn = (data: AutomationData) => data.id === d.data.id;
         break;
       }
     }
@@ -63,7 +68,8 @@ export class AutomationRenderer implements Renderer {
 
   onDragEnd(_e: d3.D3DragEvent<any, any, any>, d: BoundData<any>) {
     switch (d.type) {
-      case TYPES.AUTOMATION_POINT: {
+      case TYPES.AUTOMATION_POINT:
+      case TYPES.AUTOMATION: {
         this.#filterFn = ALWAYS;
         break;
       }
@@ -79,6 +85,17 @@ export class AutomationRenderer implements Renderer {
     switch (d.type) {
       case TYPES.AUTOMATION_POINT: {
         this.onDragAutomationPoint(e, d, xScale, yScale);
+        break;
+      }
+    }
+
+    return { type: this.TYPE };
+  }
+
+  onClick(e: MouseEvent, d: BoundData, xScale: ScaleLinear<number, number>) {
+    switch (d.type) {
+      case TYPES.AUTOMATION: {
+        this.onClickAutomation(e, d, xScale);
         break;
       }
     }
@@ -113,10 +130,14 @@ export class AutomationRenderer implements Renderer {
             .append("custom")
             .attr("class", TYPES.AUTOMATION.description!)
             .attr("y", (d) => yScale(d.track)!)
-            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.AUTOMATION));
+            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.AUTOMATION))
+            .each((d) => d.data.sort((a, b) => a.time - b.time));
         },
         (update) => {
-          return update.attr("y", (d) => yScale(d.track)!);
+          return update
+            .filter(this.#filterFn)
+            .attr("y", (d) => yScale(d.track)!)
+            .each((d) => d.data.sort((a, b) => a.time - b.time));
         },
         (remove) => remove.remove()
       );
@@ -261,4 +282,32 @@ export class AutomationRenderer implements Renderer {
       dataPoint.time = time;
     }
   }
+
+  onClickAutomation(
+    e: MouseEvent,
+    d: BoundData<AutomationData>,
+    xScale: ScaleLinear<number, number>
+  ) {
+    if (e.metaKey) {
+      const [x] = d3.pointer(e, this.canvas);
+      const time = xScale.invert(x);
+
+      const automation = this.#automationMap.get(d.data.automation)!;
+      addAutomationPointAt(d.data.data, automation, time);
+    }
+  }
+}
+
+function addAutomationPointAt(
+  values: Array<AutomationPoint>,
+  automation: Automation,
+  time: number
+) {
+  const previous = values.findLast((v) => v.time < time);
+
+  values.push({
+    id: crypto.randomUUID(),
+    time,
+    value: previous?.value ?? automation.origin,
+  });
 }
