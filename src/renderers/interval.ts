@@ -520,13 +520,14 @@ function resizeRight(
   xScale: d3.ScaleLinear<number, number>,
   yScale: d3.ScaleBand<string>
 ) {
-  const start = actualStart(data);
+  const start = actualStart(data) + data.fadeIn;
+  const end = data.end - data.fadeOut;
 
   let dx = xScale.invert(event.dx) - xScale.invert(0);
 
   // Prevent dragging past start
-  if (start > data.end + dx) {
-    data.end = start;
+  if (start > end + dx) {
+    data.end = start + data.fadeOut;
   } else {
     data.end = data.end + dx;
   }
