@@ -501,8 +501,8 @@ function resizeLeft(
   let dx = xScale.invert(event.dx) - xScale.invert(0);
 
   // Prevent dragging past the end
-  if (start + dx > data.end) {
-    dx = data.end - start;
+  if (start + data.fadeIn + dx > data.end - data.fadeOut) {
+    dx = data.end - data.fadeOut - start - data.fadeIn;
   }
   // Prevent dragging past the start
   else if (data.offsetStart + dx < 0) {
