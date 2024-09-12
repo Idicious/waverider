@@ -6,10 +6,10 @@ export type Interval = {
   offsetStart: number;
   end: number;
   index: number;
-  track: string;
-  data: string;
-  fadeIn: number;
-  fadeOut: number;
+  track: string; // reference to Track.id
+  data: string; // reference to AudioData.id
+  fadeIn: number; // ms
+  fadeOut: number; // ms
 };
 
 export type Track = {
@@ -20,26 +20,35 @@ export type Track = {
 
 export type AudioData = {
   id: string;
-  data: Float32Array;
+  data: Float32Array; // Decoded audio data
 };
 
-export type Automation = {};
+export type Automation = {
+  id: string;
+  name: string; // Type of automation, e.g. "Volume", "Pitch", "Filter"
+  range: [number, number]; // [min, max]
+  step: number; // step size in range
+  origin: number; // between range min and max
+};
 
-export interface ScaleData {
-  x: {
-    domain: [number, number];
-    range: [number, number];
-  };
-  y: {
-    domain: string[];
-    range: [number, number];
-  };
-}
+export type AutomationPoint = {
+  id: string;
+  time: number; // time in ms
+  value: number; // 0-1
+};
+
+export type AutomationData = {
+  id: string;
+  track: string; // reference to Track.id
+  automation: string; // reference to Automation.id
+  data: Array<AutomationPoint>;
+};
 
 export interface WaveShaperState {
   intervals: Interval[];
   tracks: Track[];
   automation: Automation[];
+  automationData: AutomationData[];
   audioData: AudioData[];
 }
 
@@ -94,7 +103,9 @@ export type Renderer = {
   onRender?: (
     selection: d3.Selection<any, any, any, any>,
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-    toHidden: boolean
+    toHidden: boolean,
+    xScale: d3.ScaleLinear<number, number>,
+    yScale: d3.ScaleBand<string>
   ) => void;
 
   onStateUpdate?: (state: WaveShaperState) => void;
@@ -138,3 +149,14 @@ export type Renderer = {
 };
 
 export type Predicate = (...args: any[]) => boolean;
+
+export interface ScaleData {
+  x: {
+    domain: [number, number];
+    range: [number, number];
+  };
+  y: {
+    domain: string[];
+    range: [number, number];
+  };
+}

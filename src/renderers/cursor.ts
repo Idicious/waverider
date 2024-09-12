@@ -4,7 +4,7 @@ import { TYPES as IntervalTypes } from "./interval";
 
 const DEFAULT = Symbol("default-cursor") as symbol;
 const MOUSE_CURSOR = {
-  [AutomationTypes.AUTOMATION_HANDLE]: "move",
+  [AutomationTypes.AUTOMATION_POINT]: "grab",
   [IntervalTypes.INTERVAL]: "move",
   [IntervalTypes.RESIZE_LEFT]: "ew-resize",
   [IntervalTypes.RESIZE_RIGHT]: "ew-resize",

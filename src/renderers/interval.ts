@@ -34,6 +34,7 @@ export class IntervalRenderer implements Renderer {
   #drawDataCache = new Map<string, [number, number][]>();
   #bindFilter = { type: this.TYPE } as const;
   #zoomFactor = 1;
+  #colorMap = new Map<string, string>();
 
   #resetFilter = () => {
     this.#filterFn = ALWAYS;
@@ -42,8 +43,7 @@ export class IntervalRenderer implements Renderer {
   constructor(
     private readonly bindFn: (data: Interval, type: symbol) => string,
     private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
-    private readonly width: number,
-    private colorMap: Map<string, string>
+    private readonly width: number
   ) {}
 
   onZoom(e: d3.D3ZoomEvent<any, any>) {
@@ -51,7 +51,11 @@ export class IntervalRenderer implements Renderer {
   }
 
   onStateUpdate(state: WaveShaperState) {
-    this.colorMap = new Map(state.tracks.map((d) => [d.id, d.color]));
+    this.#colorMap.clear();
+
+    for (const track of state.tracks) {
+      this.#colorMap.set(track.id, track.color);
+    }
   }
 
   onDrag(
@@ -186,7 +190,7 @@ export class IntervalRenderer implements Renderer {
             .attr("y", (d) => yScale(d.track)!)
             .attr("width", (d) => getIntervalWidth(d, xScale))
             .attr("height", yScale.bandwidth())
-            .attr("fill", (d) => this.colorMap.get(d.track) ?? DEFAULT_COLOR)
+            .attr("fill", (d) => this.#colorMap.get(d.track) ?? DEFAULT_COLOR)
             .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.INTERVAL))
             .each((d) => this.summarizeAudio(d, state, xScale));
 
@@ -220,7 +224,7 @@ export class IntervalRenderer implements Renderer {
           toUpdate
             .attr("x", (d) => xScale(actualStart(d)))
             .attr("y", (d) => yScale(d.track)!)
-            .attr("fill", (d) => this.colorMap.get(d.track) ?? DEFAULT_COLOR)
+            .attr("fill", (d) => this.#colorMap.get(d.track) ?? DEFAULT_COLOR)
             .attr("width", (d) => getIntervalWidth(d, xScale))
             .each((d) => this.summarizeAudio(d, state, xScale));
 

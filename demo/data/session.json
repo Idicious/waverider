@@ -44,5 +44,33 @@
       "url": "audio/snare.wav"
     }
   ],
-  "automation": []
+  "automation": [
+    {
+      "id": "1",
+      "name": "Volume",
+      "range": [0, 1],
+      "step": 0.01,
+      "origin": 0.5
+    }
+  ],
+  "automationData": [
+    {
+      "id": "1",
+      "track": "1",
+      "automation": "1",
+      "data": [
+        { "id": "1", "time": 0, "value": 0.5 },
+        { "id": "2", "time": 1000, "value": 0.5 }
+      ]
+    },
+    {
+      "id": "2",
+      "track": "2",
+      "automation": "1",
+      "data": [
+        { "id": "3", "time": 0, "value": 0.5 },
+        { "id": "4", "time": 2000, "value": 0.75 }
+      ]
+    }
+  ]
 }

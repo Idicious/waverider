@@ -16,6 +16,7 @@ import type {
 } from "./types";
 import { CursorRenderer } from "./renderers/cursor";
 import { getDomainInMs } from "./zoom";
+import { AutomationRenderer } from "./renderers/automation";
 
 export class WaveShaper {
   #ee = new EventEmitter();
@@ -96,6 +97,7 @@ export class WaveShaper {
   #dragData: BoundData | null = null;
   #width: number;
   #height: number;
+  #state!: WaveShaperState;
 
   constructor(
     width: number,
@@ -105,7 +107,7 @@ export class WaveShaper {
     private readonly sampleRate: number,
     private readonly trackHeight: number,
     private readonly canvas: HTMLCanvasElement,
-    private state: WaveShaperState
+    state: WaveShaperState
   ) {
     const dpr = window.devicePixelRatio;
 
@@ -166,16 +168,20 @@ export class WaveShaper {
       new IntervalRenderer(
         this.bindData.bind(this),
         this.updateState.bind(this),
-        width,
-        new Map(this.state.tracks.map((d) => [d.id, d.color]))
+        width
       )
     );
 
     this.registerRenderer(new CursorRenderer(canvas));
+    this.registerRenderer(
+      new AutomationRenderer(this.trackHeight, this.bindData.bind(this))
+    );
+
+    this.updateState(() => [state, undefined, undefined]);
   }
 
   getState() {
-    const { audioData, ...state } = this.state;
+    const { audioData, ...state } = this.#state;
     return state;
   }
 
@@ -190,15 +196,6 @@ export class WaveShaper {
         range: this.#yScale.range(),
       },
     };
-  }
-
-  setState(state: WaveShaperState) {
-    this.state = state;
-    this.#yScale.domain(d3.map(state.tracks, (d) => d.id));
-    this.#ee.emit("bind");
-    this.redrawHidden();
-
-    this.#onStateUpdate.forEach((fn) => fn(this.state));
   }
 
   /**
@@ -222,13 +219,15 @@ export class WaveShaper {
   }
 
   updateState(fn: UpdateFn<WaveShaperState>) {
-    const [state, bindData, cb] = fn(this.state);
-    this.state = state;
+    const [state, bindData, cb] = fn(this.#state);
+    this.#state = state;
 
     this.#ee.emit("bind", bindData);
     this.redrawHidden();
 
     cb?.();
+
+    this.#onStateUpdate.forEach((fn) => fn(this.#state));
   }
 
   registerRenderer<T extends Renderer>(register: T) {
@@ -271,7 +270,7 @@ export class WaveShaper {
           throw new Error(`Type not registered: ${register.TYPE.description}`);
         }
 
-        register.onBind!(root, this.state, this.#xScale, this.#yScale);
+        register.onBind!(root, this.#state, this.#xScale, this.#yScale);
       });
 
       this.#ee.on("render", (toHidden = false) => {
@@ -283,7 +282,13 @@ export class WaveShaper {
 
         const context = toHidden ? this.#ctxHidden : this.#ctxHiddenDraw;
 
-        register.onRender!(rootSelection, context, toHidden);
+        register.onRender!(
+          rootSelection,
+          context,
+          toHidden,
+          this.#xScale,
+          this.#yScale
+        );
       });
     }
   }
