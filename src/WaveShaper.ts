@@ -100,16 +100,14 @@ export class WaveShaper {
   #state!: WaveShaperState;
 
   constructor(
-    width: number,
-    height: number,
-    samplesPerPixel: number,
-    scrollPositionInMs: number,
-    private readonly sampleRate: number,
-    private readonly trackHeight: number,
     private readonly canvas: HTMLCanvasElement,
+    private readonly autoContext: AudioContext,
     state: WaveShaperState
   ) {
+    const config = state.configuration;
     const dpr = window.devicePixelRatio;
+    const width = config.width;
+    const height = config.height;
 
     this.#width = width * dpr;
     this.#height = height * dpr;
@@ -133,12 +131,17 @@ export class WaveShaper {
     this.#yScale = d3
       .scaleBand()
       .domain(d3.map(state.tracks, (d) => d.id))
-      .range([0, this.trackHeight * state.tracks.length]);
+      .range([0, config.trackHeight * state.tracks.length]);
 
     this.#xScaleOriginal = d3
       .scaleLinear()
       .domain(
-        getDomainInMs(scrollPositionInMs, samplesPerPixel, sampleRate, width)
+        getDomainInMs(
+          config.scrollPosition,
+          config.samplesPerPixel,
+          this.autoContext.sampleRate,
+          width
+        )
       )
       .range([0, width]);
     this.#xScale = this.#xScaleOriginal.copy();
@@ -174,7 +177,7 @@ export class WaveShaper {
 
     this.registerRenderer(new CursorRenderer(canvas));
     this.registerRenderer(
-      new AutomationRenderer(this.trackHeight, this.bindData.bind(this))
+      new AutomationRenderer(config.trackHeight, this.bindData.bind(this))
     );
 
     this.updateState(() => [state, undefined, undefined]);
@@ -208,8 +211,8 @@ export class WaveShaper {
       getDomainInMs(
         scrollPositionInMs,
         samplesPerPixel,
-        this.sampleRate,
-        this.#width
+        this.autoContext.sampleRate,
+        this.#state.configuration.width
       )
     );
     this.#xScale = this.#xScaleOriginal.copy();

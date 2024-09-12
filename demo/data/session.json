@@ -4,7 +4,8 @@
     "width": 1000,
     "height": 500,
     "samplesPerPixel": 1323,
-    "scrollPosition": 0
+    "scrollPosition": 0,
+    "showAutomation": true
   },
   "tracks": [
     { "id": "1", "name": "Kick", "color": "red" },

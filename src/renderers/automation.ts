@@ -105,6 +105,7 @@ export class AutomationRenderer implements Renderer {
       .selectAll<Element, AutomationData>(
         `custom.${TYPES.AUTOMATION.description}`
       )
+      .filter(() => state.configuration.showAutomation)
       .data(state.automationData, (d) => d.id)
       .join(
         (enter) => {
@@ -124,6 +125,7 @@ export class AutomationRenderer implements Renderer {
       .selectAll<Element, AutomationBindData>(
         `custom.${TYPES.AUTOMATION_POINT.description}`
       )
+      .filter(() => state.configuration.showAutomation)
       .data(points, (d) => d.point.id)
       .join(
         (enter) => {

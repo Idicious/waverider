@@ -50,7 +50,22 @@ export interface WaveShaperState {
   automation: Automation[];
   automationData: AutomationData[];
   audioData: AudioData[];
+  configuration: WaveShaperConfig;
 }
+
+export type WaveShaperConfig = {
+  // render area dimensions
+  width: number;
+  height: number;
+  trackHeight: number;
+
+  // zoom / pan options
+  samplesPerPixel: number;
+  scrollPosition: number;
+
+  // render flags
+  showAutomation: boolean;
+};
 
 export type DragFn<TItem> = (
   e: d3.D3DragEvent<any, TItem, any>,
