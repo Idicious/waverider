@@ -103,6 +103,26 @@ export class WaveShaper {
     private readonly autoContext: AudioContext,
     private state: WaveShaperState
   ) {
+    const config = state.configuration;
+    this.#yScale = d3
+      .scaleBand()
+      .domain(d3.map(state.tracks, (d) => d.id))
+      .range([0, config.trackHeight * state.tracks.length]);
+
+    this.#xScaleOriginal = d3
+      .scaleLinear()
+      .domain(
+        getDomainInMs(
+          config.scrollPosition,
+          config.samplesPerPixel,
+          this.autoContext.sampleRate,
+          config.width
+        )
+      )
+      .range([0, config.width]);
+
+    this.#xScale = this.#xScaleOriginal.copy();
+
     this.initialize(state);
 
     d3.select(canvas)
@@ -319,23 +339,5 @@ export class WaveShaper {
     })!;
 
     this.#ctx.scale(dpr, dpr);
-
-    this.#yScale = d3
-      .scaleBand()
-      .domain(d3.map(state.tracks, (d) => d.id))
-      .range([0, config.trackHeight * state.tracks.length]);
-
-    this.#xScaleOriginal = d3
-      .scaleLinear()
-      .domain(
-        getDomainInMs(
-          config.scrollPosition,
-          config.samplesPerPixel,
-          this.autoContext.sampleRate,
-          width
-        )
-      )
-      .range([0, width]);
-    this.#xScale = this.#xScaleOriginal.copy();
   }
 }
