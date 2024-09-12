@@ -537,8 +537,9 @@ function fadeIn(
   data: Interval,
   xScale: d3.ScaleLinear<number, number>
 ) {
-  const time = Math.max(0, xScale.invert(event.x) - actualStart(data));
-  const fadeOutStart = data.end - data.start - (data.fadeOut ?? 0);
+  const start = actualStart(data);
+  const time = Math.max(0, xScale.invert(event.x) - start);
+  const fadeOutStart = data.end - start - data.fadeOut;
 
   // restrict fade in to between 0 and fade out start
   data.fadeIn = Math.max(0, Math.min(time, fadeOutStart));
