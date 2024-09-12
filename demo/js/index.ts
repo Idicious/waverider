@@ -4,6 +4,7 @@ import type ApiResponse from "../data/session.json";
 import type { Automation } from "src/types";
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+const automationCb = document.getElementById("automation") as HTMLInputElement;
 
 (async function main() {
   const dataLoader = new DataLoader();
@@ -20,6 +21,7 @@ const canvas = document.getElementById("canvas") as HTMLCanvasElement;
     res.json()
   );
 
+  automationCb.checked = configuration.showAutomation;
   const audioData = await dataLoader.load(audio, ctx);
 
   const waveShaper = new WaveShaper(canvas, ctx, {
@@ -29,6 +31,17 @@ const canvas = document.getElementById("canvas") as HTMLCanvasElement;
     automation: automation as Automation[],
     automationData,
     configuration,
+  });
+
+  automationCb.addEventListener("change", () => {
+    const state = waveShaper.getState();
+    state.configuration.showAutomation = automationCb.checked;
+
+    waveShaper.updateState(() => [
+      { ...state, audioData },
+      undefined,
+      undefined,
+    ]);
   });
 
   (globalThis as any)["WaveShaper"] = waveShaper;

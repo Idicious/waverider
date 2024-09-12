@@ -35,7 +35,7 @@ export class AutomationRenderer implements Renderer {
   TYPE = Symbol("automation");
 
   constructor(
-    private readonly trackHeight: number,
+    private readonly canvas: HTMLCanvasElement,
     private readonly bindFn: (data: unknown, type: symbol) => string
   ) {}
 
@@ -92,6 +92,7 @@ export class AutomationRenderer implements Renderer {
     xScale: ScaleLinear<number, number>,
     yScale: ScaleBand<string>
   ): void {
+    const trackHeight = yScale.bandwidth();
     const points = state.automationData.flatMap((d) =>
       d.data.map((p) => ({
         automationData: d.id,
@@ -105,7 +106,6 @@ export class AutomationRenderer implements Renderer {
       .selectAll<Element, AutomationData>(
         `custom.${TYPES.AUTOMATION.description}`
       )
-      .filter(() => state.configuration.showAutomation)
       .data(state.automationData, (d) => d.id)
       .join(
         (enter) => {
@@ -125,7 +125,6 @@ export class AutomationRenderer implements Renderer {
       .selectAll<Element, AutomationBindData>(
         `custom.${TYPES.AUTOMATION_POINT.description}`
       )
-      .filter(() => state.configuration.showAutomation)
       .data(points, (d) => d.point.id)
       .join(
         (enter) => {
@@ -135,8 +134,9 @@ export class AutomationRenderer implements Renderer {
             .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.AUTOMATION_POINT))
             .attr("r", AUTOMATION_HANDLE_RADIUS)
             .attr("x", (d) => xScale(d.point.time))
+            .attr("fill", "purple")
             .attr("y", (d) => {
-              return yScale(d.track)! + (1 - d.point.value) * this.trackHeight;
+              return yScale(d.track)! + (1 - d.point.value) * trackHeight;
             });
         },
         (update) => {
@@ -144,7 +144,7 @@ export class AutomationRenderer implements Renderer {
             .filter((d) => this.#filterFn(d))
             .attr("x", (d) => xScale(d.point.time))
             .attr("y", (d) => {
-              return yScale(d.track)! + (1 - d.point.value) * this.trackHeight;
+              return yScale(d.track)! + (1 - d.point.value) * trackHeight;
             });
         },
         (remove) => remove.remove()
@@ -155,38 +155,49 @@ export class AutomationRenderer implements Renderer {
     selection: Selection<any, any, any, any>,
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     toHidden: boolean,
-    xScale: ScaleLinear<number, number>
+    xScale: ScaleLinear<number, number>,
+    yScale: ScaleBand<string>,
+    state: WaveShaperState
   ): void {
+    if (!state.configuration.showAutomation) return;
+
     const that = this;
+    const trackHeight = yScale.bandwidth();
+
     selection
       .selectAll<any, AutomationData>(`custom.${TYPES.AUTOMATION.description}`)
       .each(function (d) {
-        if (toHidden) return;
-
         const node = d3.select(this);
 
-        const fillColor = "black";
+        const uniqueColor = node.attr(BIND_ATTR);
+
+        const fillColor = toHidden ? uniqueColor : "rgba(0,0,0,0.2)";
         const yStart = +node.attr("y");
+
+        ctx.fillStyle = fillColor;
+        ctx.fillRect(0, yStart, ctx.canvas.width, trackHeight);
+
+        if (toHidden) return;
 
         const automation = that.#automationMap.get(d.automation)!;
 
+        ctx.strokeStyle = "black";
         ctx.beginPath();
         // start at origin
-        ctx.moveTo(0, yStart + that.trackHeight * automation.origin);
+        ctx.moveTo(0, yStart + trackHeight * automation.origin);
 
         // draw lines between automation points
         for (const point of d.data) {
           const x = xScale(point.time);
-          const y = yStart + that.trackHeight * (1 - point.value);
+          const y = yStart + trackHeight * (1 - point.value);
           ctx.lineTo(x, y);
         }
 
         // end at value of last point
         ctx.lineTo(
           ctx.canvas.width,
-          yStart + that.trackHeight * (1 - d.data[d.data.length - 1].value)
+          yStart + trackHeight * (1 - d.data[d.data.length - 1].value)
         );
-        ctx.strokeStyle = fillColor;
         ctx.stroke();
       });
 
@@ -204,14 +215,14 @@ export class AutomationRenderer implements Renderer {
         const y = +node.attr("y");
         const r = +node.attr("r");
 
+        ctx.fillStyle = fillColor;
+
         if (toHidden) {
           // draw rect to hidden
-          ctx.fillStyle = uniqueColor;
           ctx.fillRect(x - r, y - r, r * 2, r * 2);
         } else {
           ctx.beginPath();
           ctx.arc(x, y, r, 0, 2 * Math.PI);
-          ctx.fillStyle = fillColor;
           ctx.fill();
         }
       });
@@ -223,13 +234,15 @@ export class AutomationRenderer implements Renderer {
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) {
+    const [x, y] = d3.pointer(e, this.canvas);
+
     const automationData = this.#automationDataMap.get(d.data.automationData)!;
     const point = d.data.point;
 
-    const time = xScale.invert(e.x);
+    const time = xScale.invert(x);
     const trackYStart = yScale(automationData.track)!;
-    const valueInTrack = e.y - trackYStart;
-    const value = 1 - valueInTrack / this.trackHeight;
+    const valueInTrack = y - trackYStart;
+    const value = 1 - valueInTrack / yScale.bandwidth();
 
     const index = automationData.data.indexOf(point);
     const previousPoint = automationData.data[index - 1];

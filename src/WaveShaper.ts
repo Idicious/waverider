@@ -72,18 +72,18 @@ export class WaveShaper {
       this.redrawHidden();
     });
 
-  #xScaleOriginal: d3.ScaleLinear<number, number>;
-  #xScale: d3.ScaleLinear<number, number>;
+  #xScaleOriginal!: d3.ScaleLinear<number, number>;
+  #xScale!: d3.ScaleLinear<number, number>;
 
-  #yScale: d3.ScaleBand<string>;
+  #yScale!: d3.ScaleBand<string>;
 
-  #hiddenCanvas: OffscreenCanvas;
-  #hiddenCanvasDraw: OffscreenCanvas;
+  #hiddenCanvas!: OffscreenCanvas;
+  #hiddenCanvasDraw!: OffscreenCanvas;
 
   // canvas contexts
-  #ctxHidden: OffscreenCanvasRenderingContext2D;
-  #ctxHiddenDraw: OffscreenCanvasRenderingContext2D;
-  #ctx: CanvasRenderingContext2D;
+  #ctxHidden!: OffscreenCanvasRenderingContext2D;
+  #ctxHiddenDraw!: OffscreenCanvasRenderingContext2D;
+  #ctx!: CanvasRenderingContext2D;
 
   #typeRoots = new Map<symbol, d3.Selection<HTMLElement, any, any, any>>();
   #bindMap = new Map<number, { type: symbol; data: unknown }>();
@@ -95,56 +95,15 @@ export class WaveShaper {
   #onStateUpdate: Array<StateUpdateFn> = [];
   #onZoom: Array<ZoomFn> = [];
   #dragData: BoundData | null = null;
-  #width: number;
-  #height: number;
-  #state!: WaveShaperState;
+  #width!: number;
+  #height!: number;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly autoContext: AudioContext,
-    state: WaveShaperState
+    private state: WaveShaperState
   ) {
-    const config = state.configuration;
-    const dpr = window.devicePixelRatio;
-    const width = config.width;
-    const height = config.height;
-
-    this.#width = width * dpr;
-    this.#height = height * dpr;
-
-    canvas.width = this.#width;
-    canvas.height = this.#height;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-
-    this.#hiddenCanvas = new OffscreenCanvas(this.#width, this.#height);
-    this.#hiddenCanvasDraw = new OffscreenCanvas(this.#width, this.#height);
-
-    this.#ctx = this.canvas.getContext("2d")!;
-    this.#ctxHiddenDraw = this.#hiddenCanvasDraw.getContext("2d")!;
-    this.#ctxHidden = this.#hiddenCanvas.getContext("2d", {
-      willReadFrequently: true,
-    })!;
-
-    this.#ctx.scale(dpr, dpr);
-
-    this.#yScale = d3
-      .scaleBand()
-      .domain(d3.map(state.tracks, (d) => d.id))
-      .range([0, config.trackHeight * state.tracks.length]);
-
-    this.#xScaleOriginal = d3
-      .scaleLinear()
-      .domain(
-        getDomainInMs(
-          config.scrollPosition,
-          config.samplesPerPixel,
-          this.autoContext.sampleRate,
-          width
-        )
-      )
-      .range([0, width]);
-    this.#xScale = this.#xScaleOriginal.copy();
+    this.initialize(state);
 
     d3.select(canvas)
       .call(this.#drag)
@@ -170,21 +129,20 @@ export class WaveShaper {
     this.registerRenderer(
       new IntervalRenderer(
         this.bindData.bind(this),
-        this.updateState.bind(this),
-        width
+        this.updateState.bind(this)
       )
     );
 
     this.registerRenderer(new CursorRenderer(canvas));
     this.registerRenderer(
-      new AutomationRenderer(config.trackHeight, this.bindData.bind(this))
+      new AutomationRenderer(this.canvas, this.bindData.bind(this))
     );
 
     this.updateState(() => [state, undefined, undefined]);
   }
 
   getState() {
-    const { audioData, ...state } = this.#state;
+    const { audioData, ...state } = this.state;
     return state;
   }
 
@@ -212,7 +170,7 @@ export class WaveShaper {
         scrollPositionInMs,
         samplesPerPixel,
         this.autoContext.sampleRate,
-        this.#state.configuration.width
+        this.state.configuration.width
       )
     );
     this.#xScale = this.#xScaleOriginal.copy();
@@ -222,15 +180,16 @@ export class WaveShaper {
   }
 
   updateState(fn: UpdateFn<WaveShaperState>) {
-    const [state, bindData, cb] = fn(this.#state);
-    this.#state = state;
+    const [state, bindData, cb] = fn(this.state);
+    this.state = state;
+    this.initialize(state);
 
     this.#ee.emit("bind", bindData);
     this.redrawHidden();
 
     cb?.();
 
-    this.#onStateUpdate.forEach((fn) => fn(this.#state));
+    this.#onStateUpdate.forEach((fn) => fn(this.state));
   }
 
   registerRenderer<T extends Renderer>(register: T) {
@@ -273,7 +232,7 @@ export class WaveShaper {
           throw new Error(`Type not registered: ${register.TYPE.description}`);
         }
 
-        register.onBind!(root, this.#state, this.#xScale, this.#yScale);
+        register.onBind!(root, this.state, this.#xScale, this.#yScale);
       });
 
       this.#ee.on("render", (toHidden = false) => {
@@ -290,7 +249,8 @@ export class WaveShaper {
           context,
           toHidden,
           this.#xScale,
-          this.#yScale
+          this.#yScale,
+          this.state
         );
       });
     }
@@ -334,4 +294,48 @@ export class WaveShaper {
     this.redraw();
     requestAnimationFrame(this.run);
   };
+
+  initialize(state: WaveShaperState) {
+    const config = state.configuration;
+    const dpr = window.devicePixelRatio;
+    const width = config.width;
+    const height = config.height;
+
+    this.#width = width * dpr;
+    this.#height = height * dpr;
+
+    this.canvas.width = this.#width;
+    this.canvas.height = this.#height;
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+
+    this.#hiddenCanvas = new OffscreenCanvas(this.#width, this.#height);
+    this.#hiddenCanvasDraw = new OffscreenCanvas(this.#width, this.#height);
+
+    this.#ctx = this.canvas.getContext("2d")!;
+    this.#ctxHiddenDraw = this.#hiddenCanvasDraw.getContext("2d")!;
+    this.#ctxHidden = this.#hiddenCanvas.getContext("2d", {
+      willReadFrequently: true,
+    })!;
+
+    this.#ctx.scale(dpr, dpr);
+
+    this.#yScale = d3
+      .scaleBand()
+      .domain(d3.map(state.tracks, (d) => d.id))
+      .range([0, config.trackHeight * state.tracks.length]);
+
+    this.#xScaleOriginal = d3
+      .scaleLinear()
+      .domain(
+        getDomainInMs(
+          config.scrollPosition,
+          config.samplesPerPixel,
+          this.autoContext.sampleRate,
+          width
+        )
+      )
+      .range([0, width]);
+    this.#xScale = this.#xScaleOriginal.copy();
+  }
 }

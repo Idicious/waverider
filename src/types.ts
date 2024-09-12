@@ -120,7 +120,8 @@ export type Renderer = {
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     toHidden: boolean,
     xScale: d3.ScaleLinear<number, number>,
-    yScale: d3.ScaleBand<string>
+    yScale: d3.ScaleBand<string>,
+    state: WaveShaperState
   ) => void;
 
   onStateUpdate?: (state: WaveShaperState) => void;

@@ -42,8 +42,7 @@ export class IntervalRenderer implements Renderer {
 
   constructor(
     private readonly bindFn: (data: Interval, type: symbol) => string,
-    private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
-    private readonly width: number
+    private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void
   ) {}
 
   onZoom(e: d3.D3ZoomEvent<any, any>) {
@@ -143,7 +142,7 @@ export class IntervalRenderer implements Renderer {
   ) {
     const valueOne = xScale.invert(1);
     const valueZero = xScale.invert(0);
-    const valueEnd = xScale.invert(this.width);
+    const valueEnd = xScale.invert(state.configuration.width);
     const msPerPixel = valueOne - valueZero;
     const samplesPerPixel = msPerPixel * 44.1;
     const start = actualStart(interval);
