@@ -258,12 +258,18 @@ export class AutomationRenderer implements Renderer {
     const [x, y] = d3.pointer(e, this.canvas);
 
     const automationData = this.#automationDataMap.get(d.data.automationData)!;
+    const automation = this.#automationMap.get(d.data.automation)!;
+
     const point = d.data.point;
 
     const time = xScale.invert(x);
     const trackYStart = yScale(automationData.track)!;
     const valueInTrack = y - trackYStart;
-    const value = 1 - valueInTrack / yScale.bandwidth();
+
+    const value = closestMultipleOf(
+      1 - valueInTrack / yScale.bandwidth(),
+      automation.step
+    );
 
     const index = automationData.data.indexOf(point);
     const previousPoint = automationData.data[index - 1];
@@ -323,11 +329,15 @@ function addAutomationPointAt(
 
   values.push({
     id: crypto.randomUUID(),
+    value: closestMultipleOf(value, automation.step),
     time,
-    value,
   });
 }
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
+}
+
+function closestMultipleOf(value: number, multiple: number) {
+  return Math.round(value / multiple) * multiple;
 }
