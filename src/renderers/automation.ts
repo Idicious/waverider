@@ -304,10 +304,30 @@ function addAutomationPointAt(
   time: number
 ) {
   const previous = values.findLast((v) => v.time < time);
+  const next = values.find((v) => v.time > time);
+
+  let value: number;
+  if (previous && next) {
+    value = lerp(
+      previous.value,
+      next.value,
+      (time - previous.time) / (next.time - previous.time)
+    );
+  } else if (previous) {
+    value = previous.value;
+  } else if (next) {
+    value = next.value;
+  } else {
+    value = automation.origin;
+  }
 
   values.push({
     id: crypto.randomUUID(),
     time,
-    value: previous?.value ?? automation.origin,
+    value,
   });
+}
+
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
 }
