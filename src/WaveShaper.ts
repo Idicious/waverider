@@ -31,7 +31,7 @@ export class WaveShaper {
       });
     })
     .on("start", (event: d3.D3DragEvent<any, any, any>) => {
-      this.#dragData = this.getTargetElement(event);
+      this.#dragData = this.getTargetElement(event, false);
 
       this.#onDragStart.forEach((fn) => {
         const bindData = fn(event, this.#dragData, this.#xScale, this.#yScale);
@@ -124,7 +124,7 @@ export class WaveShaper {
       .call(this.#drag)
       .call(this.#zoom)
       .on("click", (e) => {
-        const target = this.getTargetElement(e);
+        const target = this.getTargetElement(e, false);
 
         this.#onClick.forEach((fn) => {
           const bindData = fn(e, target, this.#xScale, this.#yScale);
