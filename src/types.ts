@@ -69,21 +69,21 @@ export type WaveShaperConfig = {
 
 export type DragFn<TItem> = (
   e: d3.D3DragEvent<any, TItem, any>,
-  d: BoundData<TItem>,
+  d: BoundData<TItem> | null,
   xScale: d3.ScaleLinear<number, number>,
   yScale: d3.ScaleBand<string>
 ) => void | BindData;
 
 export type ClickFn<TItem> = (
   e: MouseEvent,
-  d: BoundData<TItem>,
+  d: BoundData<TItem> | null,
   xScale: d3.ScaleLinear<number, number>,
   yScale: d3.ScaleBand<string>
 ) => void | BindData;
 
 export type MouseOverFn<TItem> = (
   e: MouseEvent,
-  d: BoundData<TItem> | undefined,
+  d: BoundData<TItem> | null,
   xScale: d3.ScaleLinear<number, number>,
   yScale: d3.ScaleBand<string>
 ) => void | BindData;
@@ -128,35 +128,35 @@ export type Renderer = {
 
   onDrag?: (
     e: d3.D3DragEvent<any, any, any>,
-    d: BoundData,
+    d: BoundData | null,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) => void;
 
   onDragStart?: (
     e: d3.D3DragEvent<any, any, any>,
-    d: BoundData<any>,
+    d: BoundData | null,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) => void;
 
   onDragEnd?: (
     e: d3.D3DragEvent<any, any, any>,
-    d: BoundData,
+    d: BoundData | null,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) => void;
 
   onClick?: (
     e: MouseEvent,
-    d: BoundData,
+    d: BoundData | null,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) => void | BindData;
 
   onMouseOver?: (
     e: MouseEvent,
-    d: BoundData | undefined,
+    d: BoundData | null,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) => void | BindData;

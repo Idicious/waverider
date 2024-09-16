@@ -59,11 +59,11 @@ export class IntervalRenderer implements Renderer {
 
   onDrag(
     e: d3.D3DragEvent<any, any, any>,
-    d: BoundData<Interval>,
+    d: BoundData<Interval> | null,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) {
-    switch (d.type) {
+    switch (d?.type) {
       case TYPES.INTERVAL: {
         dragInterval(e, d.data, xScale, yScale);
         break;
@@ -89,8 +89,8 @@ export class IntervalRenderer implements Renderer {
     return this.#bindFilter;
   }
 
-  onDragStart(_: d3.D3DragEvent<any, any, any>, d: BoundData<Interval>) {
-    switch (d.type) {
+  onDragStart(_: d3.D3DragEvent<any, any, any>, d: BoundData<Interval> | null) {
+    switch (d?.type) {
       case TYPES.INTERVAL:
       case TYPES.RESIZE_LEFT:
       case TYPES.RESIZE_RIGHT:
@@ -109,8 +109,11 @@ export class IntervalRenderer implements Renderer {
     }
   }
 
-  onDragEnd(_: d3.D3DragEvent<any, Interval, any>, d: BoundData<Interval>) {
-    switch (d.type) {
+  onDragEnd(
+    _: d3.D3DragEvent<any, Interval, any>,
+    d: BoundData<Interval> | null
+  ) {
+    switch (d?.type) {
       case TYPES.INTERVAL:
       case TYPES.RESIZE_LEFT:
       case TYPES.RESIZE_RIGHT:
@@ -124,11 +127,11 @@ export class IntervalRenderer implements Renderer {
 
   onClick(
     e: MouseEvent,
-    d: BoundData<Interval>,
+    d: BoundData<Interval> | null,
     xScale: d3.ScaleLinear<number, number, never>,
     yScale: d3.ScaleBand<string>
   ) {
-    switch (d.type) {
+    switch (d?.type) {
       case TYPES.INTERVAL:
         this.cutInterval(e, d.data, xScale);
         break;

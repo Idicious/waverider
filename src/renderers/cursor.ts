@@ -19,7 +19,7 @@ export class CursorRenderer implements Renderer {
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
 
-  onMouseOver(_: MouseEvent, d: BoundData | undefined): void | BindData {
+  onMouseOver(_: MouseEvent, d: BoundData | null): void | BindData {
     const cursor = MOUSE_CURSOR[d?.type ?? DEFAULT];
     this.canvas.style.cursor = cursor ?? "default";
   }

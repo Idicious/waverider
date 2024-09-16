@@ -25,28 +25,22 @@ export class WaveShaper {
     .drag<HTMLCanvasElement, unknown>()
     .filter((event) => !event.metaKey)
     .on("drag", (event: d3.D3DragEvent<any, any, any>) => {
-      if (this.#dragData == null) return;
-
       this.#onDrag.forEach((fn) => {
-        const bindData = fn(event, this.#dragData!, this.#xScale, this.#yScale);
+        const bindData = fn(event, this.#dragData, this.#xScale, this.#yScale);
         bindData && this.#ee.emit("bind", bindData);
       });
     })
     .on("start", (event: d3.D3DragEvent<any, any, any>) => {
-      const target = this.getTargetElement(event);
-      if (target == null) return;
+      this.#dragData = this.getTargetElement(event);
 
-      this.#dragData = target;
       this.#onDragStart.forEach((fn) => {
-        const bindData = fn(event, target, this.#xScale, this.#yScale);
+        const bindData = fn(event, this.#dragData, this.#xScale, this.#yScale);
         bindData && this.#ee.emit("bind", bindData);
       });
     })
     .on("end", (event: d3.D3DragEvent<any, any, any>) => {
-      if (this.#dragData == null) return;
-
       this.#onDragEnd.forEach((fn) => {
-        const bindData = fn(event, this.#dragData!, this.#xScale, this.#yScale);
+        const bindData = fn(event, this.#dragData, this.#xScale, this.#yScale);
         bindData && this.#ee.emit("bind", bindData);
       });
 
@@ -107,7 +101,8 @@ export class WaveShaper {
     this.#yScale = d3
       .scaleBand()
       .domain(d3.map(state.tracks, (d) => d.id))
-      .range([0, config.trackHeight * state.tracks.length]);
+      .range([0, config.trackHeight * state.tracks.length])
+      .padding(0.1);
 
     this.#xScaleOriginal = d3
       .scaleLinear()
@@ -130,7 +125,6 @@ export class WaveShaper {
       .call(this.#zoom)
       .on("click", (e) => {
         const target = this.getTargetElement(e);
-        if (target == null) return;
 
         this.#onClick.forEach((fn) => {
           const bindData = fn(e, target, this.#xScale, this.#yScale);
@@ -155,7 +149,11 @@ export class WaveShaper {
 
     this.registerRenderer(new CursorRenderer(canvas));
     this.registerRenderer(
-      new AutomationRenderer(this.canvas, this.bindData.bind(this))
+      new AutomationRenderer(
+        canvas,
+        this.bindData.bind(this),
+        this.updateState.bind(this)
+      )
     );
 
     this.updateState(() => [state, undefined, undefined]);
@@ -285,10 +283,10 @@ export class WaveShaper {
   getTargetElement(event: any, redraw = true) {
     redraw && this.redrawHidden();
 
-    const [x, y] = d3.pointer(event);
+    const [x, y] = d3.pointer(event, this.canvas);
     const rgb = this.#ctxHidden.getImageData(x, y, 1, 1).data;
     const bindColor = toBindColor(rgb);
-    return this.#bindMap.get(bindColor);
+    return this.#bindMap.get(bindColor) ?? null;
   }
 
   process() {

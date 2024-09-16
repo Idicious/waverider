@@ -8,6 +8,7 @@ import {
   BoundData,
   Predicate,
   Renderer,
+  UpdateFn,
   WaveShaperState,
 } from "../types";
 import { BIND_ATTR } from "../bind";
@@ -31,12 +32,15 @@ export class AutomationRenderer implements Renderer {
   #automationMap = new Map<string, Automation>();
   #automationDataMap = new Map<string, AutomationData>();
   #filterFn: Predicate = ALWAYS;
+  #hoverX: number | null = null;
+  #hoverY: number | null = null;
 
   TYPE = Symbol("automation");
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    private readonly bindFn: (data: unknown, type: symbol) => string
+    private readonly bindFn: (data: unknown, type: symbol) => string,
+    private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void
   ) {}
 
   onStateUpdate(state: WaveShaperState): void {
@@ -52,8 +56,8 @@ export class AutomationRenderer implements Renderer {
     }
   }
 
-  onDragStart(_e: d3.D3DragEvent<any, any, any>, d: BoundData<any>) {
-    switch (d.type) {
+  onDragStart(_e: d3.D3DragEvent<any, any, any>, d: BoundData | null) {
+    switch (d?.type) {
       case TYPES.AUTOMATION_POINT: {
         this.#filterFn = (data: AutomationBindData) =>
           data.automationData === d.data.automationData;
@@ -66,8 +70,8 @@ export class AutomationRenderer implements Renderer {
     }
   }
 
-  onDragEnd(_e: d3.D3DragEvent<any, any, any>, d: BoundData<any>) {
-    switch (d.type) {
+  onDragEnd(_e: d3.D3DragEvent<any, any, any>, d: BoundData | null) {
+    switch (d?.type) {
       case TYPES.AUTOMATION_POINT:
       case TYPES.AUTOMATION: {
         this.#filterFn = ALWAYS;
@@ -78,11 +82,11 @@ export class AutomationRenderer implements Renderer {
 
   onDrag(
     e: d3.D3DragEvent<any, any, any>,
-    d: BoundData<AutomationBindData>,
+    d: BoundData<AutomationBindData> | null,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) {
-    switch (d.type) {
+    switch (d?.type) {
       case TYPES.AUTOMATION_POINT: {
         this.onDragAutomationPoint(e, d, xScale, yScale);
         break;
@@ -92,15 +96,40 @@ export class AutomationRenderer implements Renderer {
     return { type: this.TYPE };
   }
 
-  onClick(e: MouseEvent, d: BoundData, xScale: ScaleLinear<number, number>) {
-    switch (d.type) {
+  onClick(
+    e: MouseEvent,
+    d: BoundData | null,
+    xScale: ScaleLinear<number, number>
+  ) {
+    switch (d?.type) {
       case TYPES.AUTOMATION: {
-        this.onClickAutomation(e, d, xScale);
+        this.updateState((state) => {
+          this.onClickAutomation(e, d, xScale);
+          return [state, { type: this.TYPE }, undefined];
+        });
         break;
       }
     }
+  }
 
-    return { type: this.TYPE };
+  onMouseOver(
+    e: MouseEvent,
+    d: BoundData | null,
+    xScale: ScaleLinear<number, number>,
+    yScale: ScaleBand<string>
+  ) {
+    switch (d?.type) {
+      case TYPES.AUTOMATION:
+      case TYPES.AUTOMATION_POINT: {
+        this.#hoverX = d3.pointer(e, this.canvas)[0];
+        this.#hoverY = yScale(d.data.track)!;
+        break;
+      }
+      default: {
+        this.#hoverX = null;
+        this.#hoverY = null;
+      }
+    }
   }
 
   onBind(
@@ -247,6 +276,11 @@ export class AutomationRenderer implements Renderer {
           ctx.fill();
         }
       });
+
+    if (this.#hoverX && this.#hoverY && !toHidden) {
+      ctx.fillStyle = "black";
+      ctx.fillRect(this.#hoverX, this.#hoverY, 1, trackHeight);
+    }
   }
 
   onDragAutomationPoint(
