@@ -74,6 +74,14 @@ export type DragFn<TItem> = (
   yScale: d3.ScaleBand<string>
 ) => void | BindData;
 
+export type SelectFn = (
+  e: d3.D3DragEvent<any, any, any>,
+  selectStart: [number, number],
+  selectEnd: [number, number] | null,
+  xScale: d3.ScaleLinear<number, number>,
+  yScale: d3.ScaleBand<string>
+) => void | BindData;
+
 export type ClickFn<TItem> = (
   e: MouseEvent,
   d: BoundData<TItem> | null,
@@ -146,6 +154,30 @@ export type Renderer = {
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) => void;
+
+  onSelectStart?: (
+    e: d3.D3DragEvent<any, any, any>,
+    selectStart: [number, number],
+    selectEnd: [number, number] | null,
+    xScale: d3.ScaleLinear<number, number>,
+    yScale: d3.ScaleBand<string>
+  ) => void | BindData;
+
+  onSelect?: (
+    e: d3.D3DragEvent<any, any, any>,
+    selectStart: [number, number],
+    selectEnd: [number, number] | null,
+    xScale: d3.ScaleLinear<number, number>,
+    yScale: d3.ScaleBand<string>
+  ) => void | BindData;
+
+  onSelectEnd?: (
+    e: d3.D3DragEvent<any, any, any>,
+    selectStart: [number, number],
+    selectEnd: [number, number] | null,
+    xScale: d3.ScaleLinear<number, number>,
+    yScale: d3.ScaleBand<string>
+  ) => void | BindData;
 
   onClick?: (
     e: MouseEvent,

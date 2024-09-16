@@ -13,6 +13,7 @@ import type {
   Renderer,
   WaveShaperState,
   ZoomFn,
+  SelectFn,
 } from "./types";
 import { CursorRenderer } from "./renderers/cursor";
 import { getDomainInMs } from "./zoom";
@@ -24,28 +25,88 @@ export class WaveShaper {
   #drag = d3
     .drag<HTMLCanvasElement, unknown>()
     .filter((event) => !event.metaKey)
-    .on("drag", (event: d3.D3DragEvent<any, any, any>) => {
+    .on("drag.drag", (e: d3.D3DragEvent<any, any, any>) => {
+      if (e.sourceEvent.shiftKey) return;
+
       this.#onDrag.forEach((fn) => {
-        const bindData = fn(event, this.#dragData, this.#xScale, this.#yScale);
+        const bindData = fn(e, this.#dragData, this.#xScale, this.#yScale);
         bindData && this.#ee.emit("bind", bindData);
       });
     })
-    .on("start", (event: d3.D3DragEvent<any, any, any>) => {
-      this.#dragData = this.getTargetElement(event, false);
+    .on("start.drag", (e: d3.D3DragEvent<any, any, any>) => {
+      if (e.sourceEvent.shiftKey) return;
+      this.#dragData = this.getTargetElement(e, false);
 
       this.#onDragStart.forEach((fn) => {
-        const bindData = fn(event, this.#dragData, this.#xScale, this.#yScale);
+        const bindData = fn(e, this.#dragData, this.#xScale, this.#yScale);
         bindData && this.#ee.emit("bind", bindData);
       });
     })
-    .on("end", (event: d3.D3DragEvent<any, any, any>) => {
+    .on("end.drag", (e: d3.D3DragEvent<any, any, any>) => {
+      if (e.sourceEvent.shiftKey) return;
+
       this.#onDragEnd.forEach((fn) => {
-        const bindData = fn(event, this.#dragData, this.#xScale, this.#yScale);
+        const bindData = fn(e, this.#dragData, this.#xScale, this.#yScale);
         bindData && this.#ee.emit("bind", bindData);
       });
 
       this.#dragData = null;
       this.redrawHidden();
+    })
+    .on("drag.select", (e: d3.D3DragEvent<any, any, any>) => {
+      if (!e.sourceEvent.shiftKey) return;
+      if (!this.#selecting) return;
+
+      this.#selectionEnd = d3.pointer(e, this.canvas);
+
+      this.#onSelect.forEach((fn) => {
+        const bindData = fn(
+          e,
+          this.#selectionStart!,
+          this.#selectionEnd!,
+          this.#xScale,
+          this.#yScale
+        );
+        bindData && this.#ee.emit("bind", bindData);
+      });
+    })
+    .on("start.select", (e: d3.D3DragEvent<any, any, any>) => {
+      if (!e.sourceEvent.shiftKey) return;
+
+      this.#selecting = true;
+      this.#selectionStart = d3.pointer(e, this.canvas);
+      this.#selectionEnd = this.#selectionStart;
+
+      this.#onSelectStart.forEach((fn) => {
+        const bindData = fn(
+          e,
+          this.#selectionStart!,
+          null,
+          this.#xScale,
+          this.#yScale
+        );
+
+        bindData && this.#ee.emit("bind", bindData);
+      });
+    })
+    .on("end.select", (e: d3.D3DragEvent<any, any, any>) => {
+      if (!e.sourceEvent.shiftKey) return;
+      this.#selectionEnd = d3.pointer(e, this.canvas);
+
+      this.#onSelectEnd.forEach((fn) => {
+        const bindData = fn(
+          e,
+          this.#selectionStart!,
+          this.#selectionEnd!,
+          this.#xScale,
+          this.#yScale
+        );
+        bindData && this.#ee.emit("bind", bindData);
+      });
+
+      this.#selectionStart = null;
+      this.#selectionEnd = null;
+      this.#selecting = false;
     });
 
   #zoom = d3
@@ -65,6 +126,14 @@ export class WaveShaper {
     .on("end", () => {
       this.redrawHidden();
     });
+
+  #selecting = false;
+  #selectionStart: [number, number] | null = null;
+  #selectionEnd: [number, number] | null = null;
+
+  #onSelectStart: Array<SelectFn> = [];
+  #onSelect: Array<SelectFn> = [];
+  #onSelectEnd: Array<SelectFn> = [];
 
   #xScaleOriginal!: d3.ScaleLinear<number, number>;
   #xScale!: d3.ScaleLinear<number, number>;
@@ -97,6 +166,8 @@ export class WaveShaper {
     private readonly autoContext: AudioContext,
     private state: WaveShaperState
   ) {
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
     const config = state.configuration;
     this.#yScale = d3
       .scaleBand()
@@ -153,6 +224,18 @@ export class WaveShaper {
         this.updateState.bind(this)
       )
     );
+
+    this.#ee.on("render", () => {
+      if (this.#selecting) {
+        this.#ctxHiddenDraw.fillStyle = "rgba(0, 0, 0, 0.1)";
+        this.#ctxHiddenDraw.fillRect(
+          this.#selectionStart![0],
+          this.#selectionStart![1],
+          this.#selectionEnd![0] - this.#selectionStart![0],
+          this.#selectionEnd![1] - this.#selectionStart![1]
+        );
+      }
+    });
 
     this.updateState(() => [state, undefined, undefined], true);
   }
@@ -232,6 +315,11 @@ export class WaveShaper {
     register.onZoom && this.#onZoom.push(register.onZoom.bind(register));
     register.onStateUpdate &&
       this.#onStateUpdate.push(register.onStateUpdate.bind(register));
+    register.onSelectStart &&
+      this.#onSelectStart.push(register.onSelectStart.bind(register));
+    register.onSelect && this.#onSelect.push(register.onSelect.bind(register));
+    register.onSelectEnd &&
+      this.#onSelectEnd.push(register.onSelectEnd.bind(register));
 
     if (register.onBind && register.onRender) {
       const rootElement = document.createElement("custom");
