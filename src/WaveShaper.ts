@@ -118,8 +118,6 @@ export class WaveShaper {
 
     this.#xScale = this.#xScaleOriginal.copy();
 
-    this.initialize(state);
-
     d3.select(canvas)
       .call(this.#drag)
       .call(this.#zoom)
@@ -156,7 +154,7 @@ export class WaveShaper {
       )
     );
 
-    this.updateState(() => [state, undefined, undefined]);
+    this.updateState(() => [state, undefined, undefined], true);
   }
 
   getState() {
@@ -197,10 +195,10 @@ export class WaveShaper {
     this.redrawHidden();
   }
 
-  updateState(fn: UpdateFn<WaveShaperState>) {
+  updateState(fn: UpdateFn<WaveShaperState>, initialize = false) {
     const [state, bindData, cb] = fn(this.state);
     this.state = state;
-    this.initialize(state);
+    initialize && this.initialize(state);
 
     this.#ee.emit("bind", bindData);
     this.redrawHidden();
