@@ -248,7 +248,10 @@ export class IntervalRenderer implements Renderer {
   onRender(
     selection: d3.Selection<HTMLElement, any, any, any>,
     context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-    toHidden: boolean
+    toHidden: boolean,
+    xScale: d3.ScaleLinear<number, number, never>,
+    yScale: d3.ScaleBand<string>,
+    state: WaveShaperState
   ) {
     const that = this;
     return selection
@@ -318,6 +321,7 @@ export class IntervalRenderer implements Renderer {
         renderFades(
           context,
           toHidden,
+          state.configuration.showAutomation,
           x,
           y,
           width,
@@ -403,6 +407,7 @@ export function renderWave(
 function renderFades(
   context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   toHidden: boolean,
+  renderAutomation: boolean,
   x: number,
   y: number,
   width: number,
@@ -435,31 +440,35 @@ function renderFades(
     context.closePath();
     context.stroke();
 
-    context.fillStyle = fadeInColor;
-    context.beginPath();
-    context.arc(fadeInX, y, RESIZE_HANDLE_WIDTH, 0, 2 * Math.PI);
-    context.fill();
+    if (!renderAutomation) {
+      context.fillStyle = fadeInColor;
+      context.beginPath();
+      context.arc(fadeInX, y, RESIZE_HANDLE_WIDTH, 0, 2 * Math.PI);
+      context.fill();
 
-    context.fillStyle = fadeOutColor;
-    context.beginPath();
-    context.arc(fadeOutX, y, RESIZE_HANDLE_WIDTH, 0, 2 * Math.PI);
-    context.fill();
+      context.fillStyle = fadeOutColor;
+      context.beginPath();
+      context.arc(fadeOutX, y, RESIZE_HANDLE_WIDTH, 0, 2 * Math.PI);
+      context.fill();
+    }
   } else {
-    context.fillStyle = fadeInColor;
-    context.fillRect(
-      fadeInX - RESIZE_HANDLE_WIDTH,
-      y - RESIZE_HANDLE_WIDTH,
-      RESIZE_HANDLE_WIDTH * 2,
-      RESIZE_HANDLE_WIDTH * 2
-    );
+    if (!renderAutomation) {
+      context.fillStyle = fadeInColor;
+      context.fillRect(
+        fadeInX - RESIZE_HANDLE_WIDTH,
+        y - RESIZE_HANDLE_WIDTH,
+        RESIZE_HANDLE_WIDTH * 2,
+        RESIZE_HANDLE_WIDTH * 2
+      );
 
-    context.fillStyle = fadeOutColor;
-    context.fillRect(
-      fadeOutX - RESIZE_HANDLE_WIDTH,
-      y - RESIZE_HANDLE_WIDTH,
-      RESIZE_HANDLE_WIDTH * 2,
-      RESIZE_HANDLE_WIDTH * 2
-    );
+      context.fillStyle = fadeOutColor;
+      context.fillRect(
+        fadeOutX - RESIZE_HANDLE_WIDTH,
+        y - RESIZE_HANDLE_WIDTH,
+        RESIZE_HANDLE_WIDTH * 2,
+        RESIZE_HANDLE_WIDTH * 2
+      );
+    }
   }
 }
 
