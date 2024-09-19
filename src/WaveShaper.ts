@@ -18,6 +18,7 @@ import type {
 import { CursorRenderer } from "./renderers/cursor";
 import { getDomainInMs } from "./zoom";
 import { AutomationRenderer } from "./renderers/automation";
+import { getSelection } from "./utils";
 
 export class WaveShaper {
   #ee = new EventEmitter();
@@ -62,8 +63,7 @@ export class WaveShaper {
       this.#onSelect.forEach((fn) => {
         const bindData = fn(
           e,
-          this.#selectionStart!,
-          this.#selectionEnd!,
+          getSelection(this.#selectionStart!, this.#selectionEnd!),
           this.#xScale,
           this.#yScale
         );
@@ -80,8 +80,7 @@ export class WaveShaper {
       this.#onSelectStart.forEach((fn) => {
         const bindData = fn(
           e,
-          this.#selectionStart!,
-          null,
+          getSelection(this.#selectionStart!, this.#selectionEnd!),
           this.#xScale,
           this.#yScale
         );
@@ -96,8 +95,7 @@ export class WaveShaper {
       this.#onSelectEnd.forEach((fn) => {
         const bindData = fn(
           e,
-          this.#selectionStart!,
-          this.#selectionEnd!,
+          getSelection(this.#selectionStart!, this.#selectionEnd!),
           this.#xScale,
           this.#yScale
         );

@@ -41,7 +41,14 @@ export type AutomationData = {
   id: string;
   track: string; // reference to Track.id
   automation: string; // reference to Automation.id
-  data: Array<AutomationPoint>;
+  points: Array<AutomationPoint>;
+};
+
+export type Selection = {
+  x1: number;
+  x2: number;
+  y1: number;
+  y2: number;
 };
 
 export interface WaveShaperState {
@@ -76,8 +83,7 @@ export type DragFn<TItem> = (
 
 export type SelectFn = (
   e: d3.D3DragEvent<any, any, any>,
-  selectStart: [number, number],
-  selectEnd: [number, number] | null,
+  selection: Selection,
   xScale: d3.ScaleLinear<number, number>,
   yScale: d3.ScaleBand<string>
 ) => void | BindData;
@@ -157,24 +163,21 @@ export type Renderer = {
 
   onSelectStart?: (
     e: d3.D3DragEvent<any, any, any>,
-    selectStart: [number, number],
-    selectEnd: [number, number] | null,
+    selection: Selection,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) => void | BindData;
 
   onSelect?: (
     e: d3.D3DragEvent<any, any, any>,
-    selectStart: [number, number],
-    selectEnd: [number, number] | null,
+    selection: Selection,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) => void | BindData;
 
   onSelectEnd?: (
     e: d3.D3DragEvent<any, any, any>,
-    selectStart: [number, number],
-    selectEnd: [number, number] | null,
+    selection: Selection,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>
   ) => void | BindData;
