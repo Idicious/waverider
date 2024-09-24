@@ -8,7 +8,7 @@ import {
   Predicate,
 } from "../types";
 import { BIND_ATTR } from "../bind";
-import { ALWAYS, invertYScale } from "../utils";
+import { ALWAYS, getDrawValue, invertYScale } from "../utils";
 import { summarizeAudio } from "../audio";
 
 export const TYPES = {
@@ -567,8 +567,4 @@ function fadeOut(
 
   // restrict fade out to between 0 and fade in end
   data.fadeOut = Math.max(0, Math.min(time, data.end - fadeInEnd));
-}
-
-function getDrawValue(n: number, toHidden: boolean) {
-  return toHidden ? Math.round(n) : n;
 }

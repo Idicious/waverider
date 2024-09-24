@@ -21,3 +21,7 @@ export function getSelection(
     y2: Math.max(start[1], end[1]),
   };
 }
+
+export function getDrawValue(n: number, toHidden: boolean) {
+  return toHidden ? Math.round(n) : n;
+}

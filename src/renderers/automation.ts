@@ -12,7 +12,7 @@ import {
   WaveShaperState,
 } from "../types";
 import { BIND_ATTR } from "../bind";
-import { ALWAYS, invertYScale } from "../utils";
+import { ALWAYS, getDrawValue, invertYScale } from "../utils";
 
 export const AUTOMATION_HANDLE_RADIUS = 5;
 
@@ -357,9 +357,9 @@ export class AutomationRenderer implements Renderer {
           ? "red"
           : node.attr("fill");
 
-        const x = +node.attr("x");
-        const y = +node.attr("y");
-        const r = +node.attr("r");
+        const x = getDrawValue(+node.attr("x"), toHidden);
+        const y = getDrawValue(+node.attr("y"), toHidden);
+        const r = getDrawValue(+node.attr("r"), toHidden);
 
         ctx.fillStyle = fillColor;
 
