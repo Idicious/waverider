@@ -36,7 +36,7 @@ export async function getScales(page: Page) {
   });
 
   const xScale = scaleLinear(x.domain, x.range);
-  const yScale = scaleBand(y.domain, y.range);
+  const yScale = scaleBand(y.domain, y.range).padding(y.padding);
 
   return { xScale, yScale };
 }

@@ -209,5 +209,6 @@ export interface ScaleData {
   y: {
     domain: string[];
     range: [number, number];
+    padding: number;
   };
 }

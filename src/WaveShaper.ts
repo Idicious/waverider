@@ -252,6 +252,7 @@ export class WaveShaper {
       y: {
         domain: this.#yScale.domain(),
         range: this.#yScale.range(),
+        padding: this.#yScale.padding(),
       },
     };
   }
