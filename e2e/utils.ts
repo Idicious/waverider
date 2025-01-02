@@ -6,7 +6,7 @@ import { invertYScale } from "src/utils";
 export const RESIZE_HANDLE_WIDTH = 5;
 
 export async function loadPage(page: Page) {
-  await page.goto("http://localhost:5173");
+  await page.goto("/");
   const canvas = await page.$("canvas");
 
   expect(canvas).not.toBeNull();
