@@ -2,7 +2,8 @@
   "compilerOptions": {
     "target": "es2020",
     "lib": ["ESNext", "DOM"],
-    "module": "commonjs",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,

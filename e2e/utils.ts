@@ -1,16 +1,50 @@
-import { expect, Page } from "@playwright/test";
-import { ScaleBand, scaleBand, ScaleLinear, scaleLinear } from "d3";
-import { Interval, ScaleData, WaveShaperState } from "src/types";
+import { expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { scaleBand, scaleLinear } from "d3";
+import type { ScaleBand, ScaleLinear } from "d3";
+import { fileURLToPath } from "node:url";
+import type { Interval, ScaleData, WaveShaperState } from "src/types";
 import { invertYScale } from "src/utils";
 
 export const RESIZE_HANDLE_WIDTH = 5;
+
+/**
+ * Vite serves modules from outside its root under /@fs, which lets a browser
+ * test import library code directly instead of reaching it through the demo.
+ */
+export const AUDIO_MODULE_URL =
+  "/@fs" + fileURLToPath(new URL("../src/audio.ts", import.meta.url));
 
 export async function loadPage(page: Page) {
   await page.goto("/");
   const canvas = await page.$("canvas");
 
   expect(canvas).not.toBeNull();
+  await waitForRender(page);
+
   return canvas;
+}
+
+/**
+ * The demo decodes its audio before it constructs a WaveShaper, so the canvas
+ * is still blank for a while after the page loads. Wait for the first frame
+ * rather than racing it.
+ */
+export async function waitForRender(page: Page) {
+  await page.waitForFunction(() => {
+    if ((globalThis as any)["WaveShaper"] == null) return false;
+
+    const canvas = document.querySelector("canvas");
+    const context = canvas?.getContext("2d", { willReadFrequently: true });
+    if (canvas == null || context == null) return false;
+
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 0) return true;
+    }
+
+    return false;
+  });
 }
 
 export async function zoom(page: Page, location: Location, level: number) {
@@ -136,9 +170,11 @@ export async function cutLocation(page: Page, location: Location) {
     throw new Error("track not found");
   }
 
-  await page.keyboard.down("ControlOrMeta");
+  // the renderer checks metaKey, so press Meta rather than ControlOrMeta -
+  // the latter maps to Control off macOS and never triggers a cut
+  await page.keyboard.down("Meta");
   await canvas!.click({ button: "left", position: { x, y } });
-  await page.keyboard.up("ControlOrMeta");
+  await page.keyboard.up("Meta");
 }
 
 export async function cutInterval(
@@ -160,7 +196,7 @@ export async function cutInterval(
 
   const position = getCoordinates(location, xScale, yScale);
 
-  await page.keyboard.down("ControlOrMeta");
+  await page.keyboard.down("Meta");
   await canvas!.click({ button: "left", position });
-  await page.keyboard.up("ControlOrMeta");
+  await page.keyboard.up("Meta");
 }

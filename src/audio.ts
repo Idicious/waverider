@@ -1,199 +1,191 @@
+/**
+ * Number of samples inspected per pixel. The sample range behind a pixel is
+ * decimated down to (at most) this many samples, which bounds the cost of
+ * summarizing by the width of the draw area instead of the length of the audio.
+ */
 const RESOLUTION = 128;
-const ALLIGNMENT = 128;
 
+/**
+ * Two values per pixel - the negative and positive RMS of the samples behind
+ * that pixel - packed as [min0, max0, min1, max1, ...].
+ *
+ * A flat typed array keeps the summary allocation-free on the hot path; a
+ * tuple per pixel meant thousands of short lived arrays on every frame.
+ */
+export type DrawData = Float32Array;
+
+export interface CacheData {
+  /**
+   * Left edge of the summarized window, as an index into the global pixel
+   * grid rather than a time. Everything is cached in grid coordinates so that
+   * reusing pixels across a pan is an exact move instead of a rounded one.
+   */
+  startPixel: number;
+  width: number;
+  spp: number;
+  sampleRate: number;
+  drawData: DrawData;
+}
+
+const EMPTY: DrawData = new Float32Array(0);
+
+const cache = new Map<string, CacheData>();
+
+/**
+ * Summarize the audio behind a time window into one min/max pair per pixel.
+ *
+ * Pixels are placed on a grid anchored at sample 0, so the samples behind a
+ * pixel depend only on its absolute grid index. That makes the summary stable
+ * under panning, cutting and zooming: a pixel that is still on screen after a
+ * pan describes exactly the same samples, so it can be moved into its new
+ * position rather than recomputed.
+ *
+ * @param spp samples per pixel, i.e. the current zoom level
+ */
 export function summarizeAudio(
   data: Float32Array,
   cacheKey: string,
   startMs: number,
   durationMs: number,
   spp: number,
-  zoomFactor: number
-) {
-  let [start, end, drawData, width] = getCachedData(
+  sampleRate: number
+): DrawData {
+  if (spp <= 0 || durationMs <= 0 || sampleRate <= 0) return EMPTY;
+
+  const samplesPerMs = sampleRate / 1000;
+  const startPixel = Math.round((startMs * samplesPerMs) / spp);
+  const width = Math.round((durationMs * samplesPerMs) / spp);
+
+  if (width <= 0) return EMPTY;
+
+  const { drawData, gaps } = reuseCachedData(
     cacheKey,
-    startMs,
-    durationMs,
+    startPixel,
+    width,
     spp,
-    zoomFactor
+    sampleRate
   );
 
-  if (start === end) return drawData;
-  const skip = Math.ceil(spp / RESOLUTION);
+  for (const [from, to] of gaps) {
+    summarizeRange(data, drawData, startPixel, from, to, spp);
+  }
 
-  // Alligning the start sample used for drawing waveforms causes less shifting when introducing cuts and zoom
-  const startSample = startMs * 44.1;
+  cache.set(cacheKey, { startPixel, width, spp, sampleRate, drawData });
+
+  return drawData;
+}
+
+/**
+ * Drop the summary held for a key. Call this when the thing being summarized
+ * goes away, otherwise the cache grows for the lifetime of the page.
+ */
+export function clearCachedData(cacheKey: string) {
+  cache.delete(cacheKey);
+}
+
+/**
+ * Position the pixels we already have for this key, and report which ranges
+ * still need to be computed.
+ */
+function reuseCachedData(
+  cacheKey: string,
+  startPixel: number,
+  width: number,
+  spp: number,
+  sampleRate: number
+): { drawData: DrawData; gaps: Array<[number, number]> } {
+  const size = width * 2;
+  const cached = cache.get(cacheKey);
+
+  // A change in zoom level or sample rate moves every pixel onto a different
+  // grid, so nothing can be carried over.
+  const reusable =
+    cached !== undefined &&
+    cached.spp === spp &&
+    cached.sampleRate === sampleRate;
+
+  if (!reusable) {
+    return { drawData: new Float32Array(size), gaps: [[0, width]] };
+  }
+
+  // Overlap between the cached window and the requested one, in grid pixels.
+  const from = Math.max(startPixel, cached!.startPixel);
+  const to = Math.min(startPixel + width, cached!.startPixel + cached!.width);
+  const overlap = to - from;
+
+  if (overlap <= 0) {
+    return { drawData: new Float32Array(size), gaps: [[0, width]] };
+  }
+
+  const source = from - cached!.startPixel;
+  const target = from - startPixel;
+
+  let drawData: DrawData;
+  if (cached!.drawData.length === size) {
+    // Same width: shift in place, which is the common case while panning.
+    drawData = cached!.drawData;
+    drawData.copyWithin(target * 2, source * 2, (source + overlap) * 2);
+  } else {
+    drawData = new Float32Array(size);
+    drawData.set(
+      cached!.drawData.subarray(source * 2, (source + overlap) * 2),
+      target * 2
+    );
+  }
+
+  const gaps: Array<[number, number]> = [];
+  if (target > 0) gaps.push([0, target]);
+  if (target + overlap < width) gaps.push([target + overlap, width]);
+
+  return { drawData, gaps };
+}
+
+/**
+ * Compute pixels [from, to) of the window starting at `startPixel`.
+ *
+ * Each pixel gets the RMS of its positive samples and the RMS of its negative
+ * samples, so the waveform keeps a sense of its envelope on both sides of the
+ * centre line. Only every `skip`th sample is inspected.
+ */
+function summarizeRange(
+  data: Float32Array,
+  drawData: DrawData,
+  startPixel: number,
+  from: number,
+  to: number,
+  spp: number
+) {
+  const skip = Math.max(1, Math.ceil(spp / RESOLUTION));
   const length = data.length;
 
-  // For each pixel in draw area
-  for (; start < end; start++) {
-    const pixelStartSample = Math.round(startSample + start * spp);
+  for (let pixel = from; pixel < to; pixel++) {
+    // Rounding both edges off the grid index keeps neighbouring pixels tiled
+    // exactly, with no gap or overlap between their sample ranges.
+    const first = Math.round((startPixel + pixel) * spp);
+    const last = Math.round((startPixel + pixel + 1) * spp);
+
+    // Clamp to the buffer so a pixel that only partly covers the audio is
+    // averaged over the samples that actually exist, instead of being faded
+    // out by the ones that do not.
+    const start = Math.max(first, 0);
+    const end = Math.min(last, length);
 
     let posSum = 0;
     let negSum = 0;
     let count = 0;
 
-    // Iterate over the sample range for this pixel (spp)
-    // and find the min and max values.
-    for (let j = 0; j < spp; j += skip, count++) {
-      const index = pixelStartSample + j;
-      if (index < length) {
-        const val = data[index];
-        if (val > 0) {
-          posSum += val * val;
-        } else {
-          negSum += val * val;
-        }
+    for (let i = start; i < end; i += skip, count++) {
+      const val = data[i];
+      if (val > 0) {
+        posSum += val * val;
+      } else {
+        negSum += val * val;
       }
     }
 
-    const min = -Math.sqrt(negSum / count);
-    const max = Math.sqrt(posSum / count);
+    const scale = count > 0 ? 1 / count : 0;
 
-    drawData[start] = [min, max];
+    drawData[pixel * 2] = -Math.sqrt(negSum * scale);
+    drawData[pixel * 2 + 1] = Math.sqrt(posSum * scale);
   }
-
-  cache.set(cacheKey, {
-    startMs,
-    durationMs,
-    spp,
-    drawData,
-    width,
-    zoomFactor,
-  });
-
-  return drawData;
-}
-
-export interface CacheData {
-  startMs: number;
-  durationMs: number;
-  spp: number;
-  width: number;
-  zoomFactor: number;
-  drawData: DrawData;
-}
-export type DrawData = [number, number][];
-
-const cache = new Map<string, CacheData>();
-
-export function getCachedData(
-  key: string,
-  startMs: number,
-  durationMs: number,
-  spp: number,
-  zoomFactor: number
-): [number, number, DrawData, number] {
-  const width = msToPx(durationMs, spp);
-
-  const cached = cache.get(key);
-
-  // if there is no cache or zoom level has changed we need to re-calculate
-  if (cached == null || cached.zoomFactor !== zoomFactor) {
-    return [0, width, new Array(width), width];
-  }
-
-  /**
-   * |-----cached---|
-   * |-----new------|
-   */
-  if (cached.startMs === startMs && cached.durationMs === durationMs) {
-    return [0, 0, cached.drawData, width];
-  }
-
-  /**
-   * |-----cached---|
-   * |-----new---|
-   */
-  if (cached.startMs === startMs && cached.durationMs > durationMs) {
-    // console.log("cached start complete");
-    return [0, 0, cached.drawData.slice(0, width), width];
-  }
-
-  const cachedEnd = cached.startMs + cached.durationMs;
-  const newEnd = startMs + durationMs;
-
-  /**
-   * |-----cached---|
-   *    |----new----|
-   */
-  if (cachedEnd === newEnd && cached.startMs < startMs) {
-    // console.log("cached end complete");
-
-    const diff = msToPx(startMs - cached.startMs, spp);
-    return [0, 0, cached.drawData.slice(diff), width];
-  }
-
-  /**
-   * |-----cached---|
-   * |-----new----------|
-   */
-  if (cached.startMs === startMs && cached.durationMs < durationMs) {
-    // console.log("cached start partial");
-
-    const diff = msToPx(newEnd - cachedEnd, spp);
-    const newDataArr = new Array(diff).fill([0, 0]);
-    const drawData = cached.drawData.concat(newDataArr);
-    return [width - diff, width, drawData, width];
-  }
-
-  /**
-   *    |-----cached----|
-   * |-----new----------|
-   */
-  if (cachedEnd === newEnd && cached.startMs > startMs) {
-    // console.log("cached end partial");
-
-    // const diff = width - cached.drawData.length;
-    const diff = msToPx(cached.startMs - startMs, spp);
-    const newDataArr = new Array(diff).fill([0, 0]);
-    const drawData = newDataArr.concat(cached.drawData);
-
-    return [0, diff, drawData, width];
-  }
-
-  // if the cached time window partially overlaps the new time window
-  if (
-    cached.startMs < newEnd &&
-    cachedEnd > startMs &&
-    cached.width === width
-  ) {
-    // const shift = msToPx(startMs - cached.startMs, spp);
-    const shift = startMs - cached.startMs;
-
-    const shiftLeft = shift < 0;
-    const shiftRight = shift > 0;
-    const shiftPx = Math.abs(msToPx(shift, spp));
-    const newDataArr = new Array(shiftPx).fill([0, 0]);
-
-    /**
-     * |-----cached---|
-     *   |------new-----|
-     */
-    if (shiftRight) {
-      // console.log("shift right");
-      const reUse = cached.drawData.slice(shiftPx);
-      const drawData = reUse.concat(newDataArr);
-
-      return [width - shiftPx, width, drawData, width];
-    }
-
-    /**
-     *   |-----cached---|
-     * |------new-----|
-     */
-    if (shiftLeft) {
-      // console.log("shift left");
-      const reUse = cached.drawData.slice(0, width - shiftPx);
-      const drawData = newDataArr.concat(reUse);
-
-      return [0, shiftPx, drawData, width];
-    }
-  }
-
-  // no overlap between cached and new time window
-  return [0, width, new Array(width), width];
-}
-
-function msToPx(ms: number, spp: number) {
-  return Math.round((ms * 44.1) / spp);
 }

@@ -1,4 +1,4 @@
-import { BindData, BoundData, Renderer } from "../types";
+import type { BindData, BoundData, Renderer } from "../types";
 import { TYPES as AutomationTypes } from "./automation";
 import { TYPES as IntervalTypes } from "./interval";
 
