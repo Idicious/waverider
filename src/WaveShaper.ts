@@ -23,6 +23,15 @@ import { getSelection } from "./utils";
 export class WaveShaper {
   #ee = new EventEmitter();
 
+  /**
+   * Nothing in the scene animates on its own, so the render loop only paints
+   * when something has actually changed. Every mutation ends in a "bind"
+   * emit, which is where these get raised; the selection rectangle is the one
+   * exception and marks itself.
+   */
+  #dirty = true;
+  #hiddenDirty = true;
+
   #drag = d3
     .drag<HTMLCanvasElement, unknown>()
     .filter((event) => !event.metaKey)
@@ -36,7 +45,7 @@ export class WaveShaper {
     })
     .on("start.drag", (e: d3.D3DragEvent<any, any, any>) => {
       if (e.sourceEvent.shiftKey) return;
-      this.#dragData = this.getTargetElement(e, false);
+      this.#dragData = this.getTargetElement(e);
 
       this.#onDragStart.forEach((fn) => {
         const bindData = fn(e, this.#dragData, this.#xScale, this.#yScale);
@@ -52,13 +61,13 @@ export class WaveShaper {
       });
 
       this.#dragData = null;
-      this.redrawHidden();
     })
     .on("drag.select", (e: d3.D3DragEvent<any, any, any>) => {
       if (!e.sourceEvent.shiftKey) return;
       if (!this.#selecting) return;
 
       this.#selectionEnd = d3.pointer(e, this.canvas);
+      this.invalidate();
 
       this.#onSelect.forEach((fn) => {
         const bindData = fn(
@@ -76,6 +85,7 @@ export class WaveShaper {
       this.#selecting = true;
       this.#selectionStart = d3.pointer(e, this.canvas);
       this.#selectionEnd = this.#selectionStart;
+      this.invalidate();
 
       this.#onSelectStart.forEach((fn) => {
         const bindData = fn(
@@ -105,6 +115,7 @@ export class WaveShaper {
       this.#selectionStart = null;
       this.#selectionEnd = null;
       this.#selecting = false;
+      this.invalidate();
     });
 
   #zoom = d3
@@ -120,9 +131,6 @@ export class WaveShaper {
 
       this.#onZoom.forEach((fn) => fn(e));
       this.#ee.emit("bind");
-    })
-    .on("end", () => {
-      this.redrawHidden();
     });
 
   #selecting = false;
@@ -166,6 +174,9 @@ export class WaveShaper {
   ) {
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
+    // every path that changes what is on screen ends up emitting this
+    this.#ee.on("bind", () => this.invalidate());
+
     const config = state.configuration;
     this.#yScale = d3
       .scaleBand()
@@ -191,7 +202,7 @@ export class WaveShaper {
       .call(this.#drag)
       .call(this.#zoom)
       .on("click", (e) => {
-        const target = this.getTargetElement(e, false);
+        const target = this.getTargetElement(e);
 
         this.#onClick.forEach((fn) => {
           const bindData = fn(e, target, this.#xScale, this.#yScale);
@@ -199,7 +210,7 @@ export class WaveShaper {
         });
       })
       .on("mousemove", (e) => {
-        const target = this.getTargetElement(e, false);
+        const target = this.getTargetElement(e);
 
         this.#onMouseOver.forEach((fn) => {
           const bindData = fn(e, target, this.#xScale, this.#yScale);
@@ -275,7 +286,6 @@ export class WaveShaper {
     this.#xScale = this.#xScaleOriginal.copy();
 
     this.#ee.emit("bind");
-    this.redrawHidden();
   }
 
   updateState(fn: UpdateFn<WaveShaperState>, initialize = false) {
@@ -284,7 +294,6 @@ export class WaveShaper {
     initialize && this.initialize(state);
 
     this.#ee.emit("bind", bindData);
-    this.redrawHidden();
 
     cb?.();
 
@@ -366,8 +375,13 @@ export class WaveShaper {
     return numberToRGBString(color);
   }
 
-  getTargetElement(event: any, redraw = true) {
-    redraw && this.redrawHidden();
+  getTargetElement(event: any, force = false) {
+    // Mid gesture the hit canvas is not worth rebuilding, and mousemove would
+    // otherwise rebuild it on every event: the drag target was latched at the
+    // start of the gesture, and hover is only feeding a cursor style.
+    const gesture = this.#dragData !== null || this.#selecting;
+
+    if (force || (this.#hiddenDirty && !gesture)) this.redrawHidden();
 
     const [x, y] = d3.pointer(event, this.canvas);
     const rgb = this.#ctxHidden.getImageData(x, y, 1, 1).data;
@@ -381,7 +395,15 @@ export class WaveShaper {
     this.redraw();
   }
 
+  /** Ask for a repaint on the next frame. */
+  invalidate() {
+    this.#dirty = true;
+    this.#hiddenDirty = true;
+  }
+
   redraw() {
+    this.#dirty = false;
+
     this.#ctxHiddenDraw.clearRect(0, 0, this.#width, this.#height);
     this.#ctx.clearRect(0, 0, this.#width, this.#height);
 
@@ -390,12 +412,16 @@ export class WaveShaper {
   }
 
   redrawHidden() {
+    this.#hiddenDirty = false;
+
     this.#ctxHidden.clearRect(0, 0, this.#width, this.#height);
     this.#ee.emit("render", true);
   }
 
   run = () => {
-    this.redraw();
+    // the tick still happens every frame, so a missed invalidate shows up as
+    // one late frame rather than a permanently stale canvas
+    if (this.#dirty) this.redraw();
     requestAnimationFrame(this.run);
   };
 
