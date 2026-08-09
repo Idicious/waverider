@@ -51,11 +51,13 @@ export async function zoom(page: Page, location: Location, level: number) {
   const { xScale, yScale } = await getScales(page);
   const coords = getCoordinates(location, xScale, yScale);
 
-  page.mouse.move(coords.x, coords.y);
+  await page.mouse.move(coords.x, coords.y);
 
-  await page.keyboard.down("ControlOrMeta");
+  // the zoom behaviour filters on metaKey, so press Meta rather than
+  // ControlOrMeta - the latter maps to Control off macOS and does nothing
+  await page.keyboard.down("Meta");
   await page.mouse.wheel(0, level);
-  await page.keyboard.up("ControlOrMeta");
+  await page.keyboard.up("Meta");
 }
 
 export async function expectScreenshot(page: Page) {
@@ -140,11 +142,11 @@ export async function drag(page: Page, start: Location, end: Location) {
 }
 
 export async function pan(page: Page, start: Location, end: Location) {
-  await page.keyboard.down("ControlOrMeta");
+  await page.keyboard.down("Meta");
 
   await drag(page, start, end);
 
-  await page.keyboard.up("ControlOrMeta");
+  await page.keyboard.up("Meta");
 }
 
 export async function moveInterval(

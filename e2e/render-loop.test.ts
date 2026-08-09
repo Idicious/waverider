@@ -1,32 +1,11 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import { getScales, loadPage, pan } from "./utils";
 
 /**
  * Nothing in the scene animates, so the loop should sit idle until something
  * changes and then paint once.
- *
- * These deliberately avoid ./utils: that module reaches into src, and a
- * type-only import there is emitted as a runtime import by playwright's
- * transform, which stops any test file that touches it from loading at all.
  */
-
-async function open(page: Page) {
-  await page.goto("/");
-
-  // the demo decodes audio before it constructs a WaveShaper
-  await page.waitForFunction(() => {
-    if ((globalThis as any)["WaveShaper"] == null) return false;
-
-    const canvas = document.querySelector("canvas");
-    const context = canvas?.getContext("2d", { willReadFrequently: true });
-    if (canvas == null || context == null) return false;
-
-    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
-    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) return true;
-
-    return false;
-  });
-}
 
 /** Counts paints over a window of time, optionally while doing something. */
 function countPaints(page: Page, ms: number) {
@@ -50,7 +29,7 @@ function countPaints(page: Page, ms: number) {
 }
 
 test("sits idle when nothing changes", async ({ page }) => {
-  await open(page);
+  await loadPage(page);
 
   const painted = await countPaints(page, 600);
 
@@ -59,7 +38,7 @@ test("sits idle when nothing changes", async ({ page }) => {
 });
 
 test("coalesces several changes in a frame into one paint", async ({ page }) => {
-  await open(page);
+  await loadPage(page);
 
   const painted = await page.evaluate(async () => {
     const ws = (globalThis as any)["WaveShaper"];
@@ -84,7 +63,7 @@ test("coalesces several changes in a frame into one paint", async ({ page }) => 
 });
 
 test("paints again when state changes", async ({ page }) => {
-  await open(page);
+  await loadPage(page);
 
   const before = await page.evaluate(() =>
     (document.querySelector("canvas") as HTMLCanvasElement).toDataURL()
@@ -103,8 +82,54 @@ test("paints again when state changes", async ({ page }) => {
   expect((await countPaints(page, 400)).visible).toBe(0);
 });
 
+test("repaints on zoom and pan", async ({ page }) => {
+  // the zoom behaviour lost its end handler, so this is the path that has to
+  // be carried by the bind emit alone
+  await loadPage(page);
+
+  const snapshot = () =>
+    page.evaluate(() =>
+      (document.querySelector("canvas") as HTMLCanvasElement).toDataURL()
+    );
+
+  const initial = await snapshot();
+
+  // not the shared zoom helper: it feeds canvas relative coordinates to
+  // page.mouse, which wants viewport ones, so the wheel misses the canvas
+  const box = (await (await page.$("canvas"))!.boundingBox())!;
+  await page.mouse.move(box.x + 200, box.y + 100);
+  await page.keyboard.down("Meta");
+  await page.mouse.wheel(0, -600);
+  await page.keyboard.up("Meta");
+
+  await page.waitForFunction(
+    (previous) =>
+      (document.querySelector("canvas") as HTMLCanvasElement).toDataURL() !==
+      previous,
+    initial
+  );
+
+  const zoomed = await snapshot();
+  const { xScale } = await getScales(page);
+
+  await pan(
+    page,
+    { track: "1", time: xScale.invert(300) },
+    { track: "1", time: xScale.invert(150) }
+  );
+  await page.waitForFunction(
+    (previous) =>
+      (document.querySelector("canvas") as HTMLCanvasElement).toDataURL() !==
+      previous,
+    zoomed
+  );
+
+  // and goes quiet again once the gesture is over
+  expect((await countPaints(page, 400)).visible).toBe(0);
+});
+
 test("does not rebuild the hit canvas on every mouse move", async ({ page }) => {
-  await open(page);
+  await loadPage(page);
 
   const painted = await page.evaluate(async () => {
     const ws = (globalThis as any)["WaveShaper"];
@@ -137,7 +162,7 @@ test("does not rebuild the hit canvas on every mouse move", async ({ page }) => 
 });
 
 test("keeps hit testing correct across edits", async ({ page }) => {
-  await open(page);
+  await loadPage(page);
 
   const positions = await page.evaluate(async () => {
     const ws = (globalThis as any)["WaveShaper"];
