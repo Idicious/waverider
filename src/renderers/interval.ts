@@ -10,7 +10,7 @@ import type {
 } from "../types";
 import { BIND_ATTR } from "../bind";
 import { ALWAYS, getDrawValue, invertYScale } from "../utils";
-import { clearCachedData, summarizeAudio } from "../audio";
+import { clearCachedData, summarizeAudio, DRAW_STRIDE } from "../audio";
 import type { DrawData } from "../audio";
 
 export const TYPES = {
@@ -326,7 +326,7 @@ export class IntervalRenderer implements Renderer {
               height,
               Math.max(0, x),
               y,
-              Math.min(Math.floor(width), data.length / 2),
+              Math.min(Math.floor(width), data.length / DRAW_STRIDE),
               context,
               waveColor
             );
@@ -399,6 +399,12 @@ export class IntervalRenderer implements Renderer {
   }
 }
 
+/**
+ * The peak outline is drawn washed out and the RMS band solid on top of it, so
+ * the loud part of a pixel reads differently from its transients.
+ */
+const WAVE_PEAK_ALPHA = 0.45;
+
 export function renderWave(
   data: DrawData,
   height: number,
@@ -413,23 +419,36 @@ export function renderWave(
 
   const center = y + scale;
 
+  /** Fills between the centre line and a min/max pair of the packed summary. */
+  const envelope = (minOffset: number, maxOffset: number) => {
+    const region = new Path2D();
+
+    region.moveTo(x, center);
+    for (let i = 0; i < width; i++) {
+      const value = data[i * DRAW_STRIDE + minOffset];
+      region.lineTo(i + x, Math.ceil(value * scale + center));
+    }
+    region.lineTo(end, center);
+
+    region.moveTo(x, center);
+    for (let i = 0; i < width; i++) {
+      const value = data[i * DRAW_STRIDE + maxOffset];
+      region.lineTo(i + x, Math.ceil(value * scale + center));
+    }
+    region.lineTo(end, center);
+    region.closePath();
+
+    return region;
+  };
+
+  const alpha = ctx.globalAlpha;
   ctx.fillStyle = color;
-  const region = new Path2D();
 
-  region.moveTo(x, center);
-  for (let i = 0; i < width; i++) {
-    region.lineTo(i + x, Math.ceil(data[i * 2] * scale + center));
-  }
-  region.lineTo(end, center);
+  ctx.globalAlpha = alpha * WAVE_PEAK_ALPHA;
+  ctx.fill(envelope(0, 1));
 
-  region.moveTo(x, center);
-  for (let i = 0; i < width; i++) {
-    region.lineTo(i + x, Math.ceil(data[i * 2 + 1] * scale + center));
-  }
-  region.lineTo(end, center);
-  region.closePath();
-
-  ctx.fill(region);
+  ctx.globalAlpha = alpha;
+  ctx.fill(envelope(2, 3));
 }
 
 function renderFades(

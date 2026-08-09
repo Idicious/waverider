@@ -144,7 +144,7 @@ test.describe("summarizeAudio", () => {
     // AudioContext.sampleRate, which is 48kHz on most hardware.
     const result = await page.evaluate(
       async ({ url }) => {
-        const { summarizeAudio } = await import(url);
+        const { summarizeAudio, DRAW_STRIDE } = await import(url);
 
         const measure = (sampleRate: number) => {
           const data = new Float32Array(sampleRate * 2);
@@ -164,14 +164,14 @@ test.describe("summarizeAudio", () => {
 
           let first = -1;
           let last = -1;
-          for (let pixel = 0; pixel < summary.length / 2; pixel++) {
-            if (summary[pixel * 2 + 1] > 0.5) {
+          for (let pixel = 0; pixel < summary.length / DRAW_STRIDE; pixel++) {
+            if (summary[pixel * DRAW_STRIDE + 1] > 0.5) {
               if (first < 0) first = pixel;
               last = pixel;
             }
           }
 
-          return { first, last, width: summary.length / 2 };
+          return { first, last, width: summary.length / DRAW_STRIDE };
         };
 
         return { at44100: measure(44100), at48000: measure(48000) };
@@ -190,15 +190,15 @@ test.describe("summarizeAudio", () => {
     // out the last pixel of every clip.
     const pixels = await page.evaluate(
       async ({ url, sampleRate }) => {
-        const { summarizeAudio } = await import(url);
+        const { summarizeAudio, DRAW_STRIDE } = await import(url);
 
         const data = new Float32Array(sampleRate).fill(0.5); // exactly 1000ms
         // window runs 200ms past the end of the audio
         const summary = summarizeAudio(data, "tail", 800, 400, 512, sampleRate);
 
         const max: number[] = [];
-        for (let pixel = 0; pixel < summary.length / 2; pixel++) {
-          max.push(summary[pixel * 2 + 1]);
+        for (let pixel = 0; pixel < summary.length / DRAW_STRIDE; pixel++) {
+          max.push(summary[pixel * DRAW_STRIDE + 1]);
         }
         return max;
       },
@@ -212,6 +212,107 @@ test.describe("summarizeAudio", () => {
     expect(outside.length).toBeGreaterThan(0);
     // every pixel backed by audio reads the true amplitude, none are dimmed
     for (const value of inside) expect(value).toBeCloseTo(0.5, 5);
+  });
+
+  test("reads the outline from peaks and the band from level", async ({
+    page,
+  }) => {
+    const result = await page.evaluate(
+      async ({ url, sampleRate }) => {
+        const { summarizeAudio, DRAW_STRIDE } = await import(url);
+
+        // a quiet tone with a short loud transient in every pixel
+        const spp = 441;
+        const data = new Float32Array(sampleRate);
+        for (let i = 0; i < data.length; i++) {
+          data[i] = i % spp < 30 ? 0.95 : 0.1 * Math.sin(i / 20);
+        }
+
+        const summary = summarizeAudio(data, "peaks", 200, 500, spp, sampleRate);
+        const offset = 10 * DRAW_STRIDE;
+
+        return {
+          maxPeak: summary[offset + 1],
+          maxBand: summary[offset + 3],
+        };
+      },
+      { url: AUDIO_MODULE_URL, sampleRate: SAMPLE_RATE }
+    );
+
+    // the transient reaches the outline, but barely moves the level
+    expect(result.maxPeak).toBeGreaterThan(0.9);
+    expect(result.maxBand).toBeLessThan(0.4);
+  });
+
+  test("outlines the same signal the same way regardless of sign balance", async ({
+    page,
+  }) => {
+    // the old sign-split RMS divided each side by the total sample count, so
+    // the height of each half tracked how often the signal was positive
+    const result = await page.evaluate(
+      async ({ url, sampleRate }) => {
+        const { summarizeAudio, DRAW_STRIDE } = await import(url);
+
+        const measure = (label: string, positive: (i: number) => boolean) => {
+          const data = new Float32Array(sampleRate);
+          for (let i = 0; i < data.length; i++) data[i] = positive(i) ? 1 : -1;
+
+          const summary = summarizeAudio(data, label, 200, 500, 441, sampleRate);
+          const offset = 10 * DRAW_STRIDE;
+
+          return [summary[offset], summary[offset + 1]];
+        };
+
+        return {
+          mostlyPositive: measure("dutyHigh", (i) => i % 10 !== 0),
+          mostlyNegative: measure("dutyLow", (i) => i % 10 === 0),
+        };
+      },
+      { url: AUDIO_MODULE_URL, sampleRate: SAMPLE_RATE }
+    );
+
+    expect(result.mostlyPositive).toEqual([-1, 1]);
+    expect(result.mostlyNegative).toEqual([-1, 1]);
+  });
+
+  test("keeps the rms band inside the peak outline", async ({ page }) => {
+    const violations = await page.evaluate(
+      async ({ url, sampleRate }) => {
+        const { summarizeAudio, DRAW_STRIDE } = await import(url);
+
+        let violations = 0;
+
+        // lopsided, DC offset and one sided shapes at assorted zoom levels
+        for (let shape = 0; shape < 60; shape++) {
+          const data = new Float32Array(sampleRate);
+          for (let i = 0; i < data.length; i++) {
+            data[i] =
+              (shape % 3 === 0 ? 0.6 : 0) +
+              Math.sin(i / (3 + (shape % 17))) * (shape % 5) * 0.2;
+          }
+
+          const summary = summarizeAudio(
+            data, "shape" + shape, 100 + shape, 400, 200 + shape, sampleRate
+          );
+
+          for (let pixel = 0; pixel < summary.length / DRAW_STRIDE; pixel++) {
+            const o = pixel * DRAW_STRIDE;
+            const [min, max, minRms, maxRms] = [
+              summary[o], summary[o + 1], summary[o + 2], summary[o + 3],
+            ];
+
+            if (minRms < min || maxRms > max) violations++;
+            if (min > 0 || max < 0) violations++;
+            if (Number.isNaN(min) || Number.isNaN(maxRms)) violations++;
+          }
+        }
+
+        return violations;
+      },
+      { url: AUDIO_MODULE_URL, sampleRate: SAMPLE_RATE }
+    );
+
+    expect(violations).toBe(0);
   });
 
   test("releases cached summaries when an interval is removed", async ({

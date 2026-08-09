@@ -6,9 +6,21 @@
 const RESOLUTION = 128;
 
 /**
- * Two values per pixel - the negative and positive RMS of the samples behind
- * that pixel - packed as [min0, max0, min1, max1, ...].
+ * Values per pixel in a DrawData, in the order they are packed:
  *
+ *   0 minPeak  lowest sample behind the pixel, or 0 if none go below it
+ *   1 maxPeak  highest sample behind the pixel, or 0 if none go above it
+ *   2 minRms   bottom of the RMS band
+ *   3 maxRms   top of the RMS band
+ *
+ * The peaks give the outline of the waveform and the band, drawn inside it,
+ * gives a sense of how much of that outline is actually carrying level. The
+ * band is the RMS of the whole pixel mirrored about the centre line, clamped
+ * into the peak envelope so a one sided signal cannot push it outside.
+ */
+export const DRAW_STRIDE = 4;
+
+/**
  * A flat typed array keeps the summary allocation-free on the hot path; a
  * tuple per pixel meant thousands of short lived arrays on every frame.
  */
@@ -94,7 +106,7 @@ function reuseCachedData(
   spp: number,
   sampleRate: number
 ): { drawData: DrawData; gaps: Array<[number, number]> } {
-  const size = width * 2;
+  const size = width * DRAW_STRIDE;
   const cached = cache.get(cacheKey);
 
   // A change in zoom level or sample rate moves every pixel onto a different
@@ -124,12 +136,19 @@ function reuseCachedData(
   if (cached!.drawData.length === size) {
     // Same width: shift in place, which is the common case while panning.
     drawData = cached!.drawData;
-    drawData.copyWithin(target * 2, source * 2, (source + overlap) * 2);
+    drawData.copyWithin(
+      target * DRAW_STRIDE,
+      source * DRAW_STRIDE,
+      (source + overlap) * DRAW_STRIDE
+    );
   } else {
     drawData = new Float32Array(size);
     drawData.set(
-      cached!.drawData.subarray(source * 2, (source + overlap) * 2),
-      target * 2
+      cached!.drawData.subarray(
+        source * DRAW_STRIDE,
+        (source + overlap) * DRAW_STRIDE
+      ),
+      target * DRAW_STRIDE
     );
   }
 
@@ -143,9 +162,9 @@ function reuseCachedData(
 /**
  * Compute pixels [from, to) of the window starting at `startPixel`.
  *
- * Each pixel gets the RMS of its positive samples and the RMS of its negative
- * samples, so the waveform keeps a sense of its envelope on both sides of the
- * centre line. Only every `skip`th sample is inspected.
+ * Each pixel gets the lowest and highest sample behind it plus the RMS of the
+ * pixel as a whole. Only every `skip`th sample is inspected, so a transient
+ * shorter than the decimation step can still be missed when zoomed far out.
  */
 function summarizeRange(
   data: Float32Array,
@@ -170,22 +189,30 @@ function summarizeRange(
     const start = Math.max(first, 0);
     const end = Math.min(last, length);
 
-    let posSum = 0;
-    let negSum = 0;
+    // Peaks are measured against the centre line rather than against the
+    // samples, so a pixel that never crosses zero still reads as a block from
+    // the centre out to its level instead of a detached sliver.
+    let min = 0;
+    let max = 0;
+    let sumSquares = 0;
     let count = 0;
 
     for (let i = start; i < end; i += skip, count++) {
       const val = data[i];
-      if (val > 0) {
-        posSum += val * val;
-      } else {
-        negSum += val * val;
-      }
+      if (val < min) min = val;
+      else if (val > max) max = val;
+
+      sumSquares += val * val;
     }
 
-    const scale = count > 0 ? 1 / count : 0;
+    const rms = count > 0 ? Math.sqrt(sumSquares / count) : 0;
+    const offset = pixel * DRAW_STRIDE;
 
-    drawData[pixel * 2] = -Math.sqrt(negSum * scale);
-    drawData[pixel * 2 + 1] = Math.sqrt(posSum * scale);
+    drawData[offset] = min;
+    drawData[offset + 1] = max;
+    // Keep the band inside the outline; RMS can exceed a peak on the quiet
+    // side of a lopsided pixel.
+    drawData[offset + 2] = Math.max(min, -rms);
+    drawData[offset + 3] = Math.min(max, rms);
   }
 }
