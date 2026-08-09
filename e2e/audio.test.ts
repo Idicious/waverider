@@ -425,6 +425,63 @@ test.describe("waveform rendering", () => {
     expect(errors).toEqual([]);
   });
 
+  /**
+   * Counts pixels of an exact colour. The peak outline is drawn at 45% alpha,
+   * so over the red track it lands on rgb(140,0,0); with the band switched off
+   * the outline is drawn solid and that colour should not appear at all.
+   */
+  function countColor(
+    page: import("@playwright/test").Page,
+    rgb: [number, number, number]
+  ) {
+    return page.evaluate(([r, g, b]) => {
+      const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+      const ctx = canvas.getContext("2d")!;
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      let found = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] === r && data[i + 1] === g && data[i + 2] === b) found++;
+      }
+      return found;
+    }, rgb);
+  }
+
+  test("showRmsBand toggles the second layer off", async ({ page }) => {
+    await loadPage(page);
+
+    const washedOn = await countColor(page, [140, 0, 0]);
+    const solidOn = await countColor(page, [0, 0, 0]);
+
+    expect(washedOn).toBeGreaterThan(100);
+    expect(solidOn).toBeGreaterThan(100);
+
+    await page.uncheck("#rms-band");
+
+    // the outline is jagged, so a little of the wash colour survives as
+    // antialiasing along its edge - what matters is that the body of it goes
+    await page.waitForFunction(
+      (ceiling) => {
+        const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+        const { data } = canvas
+          .getContext("2d")!
+          .getImageData(0, 0, canvas.width, canvas.height);
+
+        let washed = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i] === 140 && data[i + 1] === 0 && data[i + 2] === 0) {
+            washed++;
+          }
+        }
+        return washed < ceiling;
+      },
+      washedOn / 10
+    );
+
+    // the outline is now drawn solid, so it covers what the wash used to
+    expect(await countColor(page, [0, 0, 0])).toBeGreaterThan(solidOn);
+  });
+
   test("keeps drawing a waveform after a cut", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));

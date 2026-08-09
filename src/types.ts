@@ -72,6 +72,13 @@ export type WaveShaperConfig = {
 
   // render flags
   showAutomation: boolean;
+
+  /**
+   * Draw the RMS band inside the waveform's peak outline. Turning it off
+   * halves the fills the waveform costs, which is worth having when a lot of
+   * tracks are on screen at once.
+   */
+  showRmsBand: boolean;
 };
 
 export type DragFn<TItem> = (

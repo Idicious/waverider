@@ -328,7 +328,8 @@ export class IntervalRenderer implements Renderer {
               y,
               Math.min(Math.floor(width), data.length / DRAW_STRIDE),
               context,
-              waveColor
+              waveColor,
+              state.configuration.showRmsBand
             );
           }
         }
@@ -401,7 +402,9 @@ export class IntervalRenderer implements Renderer {
 
 /**
  * The peak outline is drawn washed out and the RMS band solid on top of it, so
- * the loud part of a pixel reads differently from its transients.
+ * the loud part of a pixel reads differently from its transients. With the
+ * band turned off the outline is drawn solid instead - the wash only exists to
+ * contrast with the band.
  */
 const WAVE_PEAK_ALPHA = 0.45;
 
@@ -412,7 +415,8 @@ export function renderWave(
   y: number,
   width: number,
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  color: string
+  color: string,
+  showRmsBand: boolean
 ) {
   const scale = height / 2;
   const end = x + width;
@@ -441,8 +445,14 @@ export function renderWave(
     return region;
   };
 
-  const alpha = ctx.globalAlpha;
   ctx.fillStyle = color;
+
+  if (!showRmsBand) {
+    ctx.fill(envelope(0, 1));
+    return;
+  }
+
+  const alpha = ctx.globalAlpha;
 
   ctx.globalAlpha = alpha * WAVE_PEAK_ALPHA;
   ctx.fill(envelope(0, 1));

@@ -5,6 +5,7 @@ import type { Automation } from "src/types";
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const automationCb = document.getElementById("automation") as HTMLInputElement;
+const rmsBandCb = document.getElementById("rms-band") as HTMLInputElement;
 
 (async function main() {
   const dataLoader = new DataLoader();
@@ -22,6 +23,7 @@ const automationCb = document.getElementById("automation") as HTMLInputElement;
   );
 
   automationCb.checked = configuration.showAutomation;
+  rmsBandCb.checked = configuration.showRmsBand;
   const audioData = await dataLoader.load(audio, ctx);
 
   const waveShaper = new WaveShaper(canvas, ctx, {
@@ -36,6 +38,17 @@ const automationCb = document.getElementById("automation") as HTMLInputElement;
   automationCb.addEventListener("change", () => {
     const state = waveShaper.getState();
     state.configuration.showAutomation = automationCb.checked;
+
+    waveShaper.updateState(() => [
+      { ...state, audioData },
+      undefined,
+      undefined,
+    ]);
+  });
+
+  rmsBandCb.addEventListener("change", () => {
+    const state = waveShaper.getState();
+    state.configuration.showRmsBand = rmsBandCb.checked;
 
     waveShaper.updateState(() => [
       { ...state, audioData },
