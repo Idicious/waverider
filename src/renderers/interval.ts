@@ -8,9 +8,13 @@ import type {
   Predicate,
   AudioData,
 } from "../types";
-import { BIND_ATTR } from "../bind";
-import { ALWAYS, getDrawValue, invertYScale } from "../utils";
-import { clearCachedData, summarizeAudio, DRAW_STRIDE } from "../audio";
+import {
+  ALWAYS,
+  getDrawValue,
+  invertYScale,
+  type ModifierEvent,
+} from "../utils";
+import { AudioSummaryCache, DRAW_STRIDE } from "../audio";
 import type { DrawData } from "../audio";
 
 export const TYPES = {
@@ -24,6 +28,37 @@ export const TYPES = {
 const RESIZE_HANDLE_WIDTH = 5;
 const DEFAULT_COLOR = "steelblue";
 
+/** The bind color for each interactive part of one interval. */
+type IntervalBind = {
+  interval: string;
+  resizeLeft: string;
+  resizeRight: string;
+  fadeIn: string;
+  fadeOut: string;
+};
+
+/**
+ * Everything the render pass needs for one interval, in CSS pixels.
+ *
+ * This is held as a property on the element rather than as attributes because
+ * the render pass reads it twice a frame for every interval, and attributes
+ * would mean serialising each number to a string and parsing it back every
+ * time. Keeping the bind colors here too means the handles no longer need
+ * child elements of their own.
+ */
+type IntervalLayout = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fadeInX: number;
+  fadeOutX: number;
+  fill: string;
+  bind: IntervalBind;
+};
+
+type LayoutNode = Element & { __waveShaperLayout?: IntervalLayout };
+
 /**
  * The interval renderer is responsible for rendering the audio intervals on the canvas.
  * These are segments of audio when can be dragged, resized, cut and moved around within the same horizontal plane which represents a track,
@@ -33,6 +68,7 @@ export class IntervalRenderer implements Renderer {
   TYPE = Symbol("intervals");
 
   #filterFn: Predicate = ALWAYS;
+  #audioCache = new AudioSummaryCache();
   #drawDataCache = new Map<string, DrawData>();
   #bindFilter = { type: this.TYPE } as const;
   #colorMap = new Map<string, string>();
@@ -45,7 +81,9 @@ export class IntervalRenderer implements Renderer {
 
   constructor(
     private readonly bindFn: (data: Interval, type: symbol) => string,
+    private readonly releaseFn: (color: string) => void,
     private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
+    private readonly hasModifier: (e: ModifierEvent) => boolean,
     private readonly sampleRate: number
   ) {}
 
@@ -180,7 +218,7 @@ export class IntervalRenderer implements Renderer {
     } else {
       this.#drawDataCache.set(
         interval.id,
-        summarizeAudio(
+        this.#audioCache.summarize(
           audioData.data,
           interval.id,
           msIntoInterval + interval.offsetStart,
@@ -192,79 +230,99 @@ export class IntervalRenderer implements Renderer {
     }
   }
 
+  /** Release everything held for an interval that has gone away. */
+  clearAudioCache(intervalId: string) {
+    this.#drawDataCache.delete(intervalId);
+    this.#audioCache.clear(intervalId);
+  }
+
+  /** Called when the owning WaveShaper is destroyed. */
+  onDestroy() {
+    this.#drawDataCache.clear();
+    this.#audioCache.clearAll();
+  }
+
+  /** Recompute the drawing geometry for one interval. */
+  #layout(
+    d: Interval,
+    xScale: d3.ScaleLinear<number, number, never>,
+    yScale: d3.ScaleBand<string>,
+    bind: IntervalBind
+  ): IntervalLayout {
+    return {
+      x: xScale(actualStart(d)),
+      y: yScale(d.track)!,
+      width: getIntervalWidth(d, xScale),
+      height: yScale.bandwidth(),
+      fadeInX: xScale(actualStart(d) + (d.fadeIn ?? 0)),
+      fadeOutX: xScale(d.end - (d.fadeOut ?? 0)),
+      fill: this.#colorMap.get(d.track) ?? DEFAULT_COLOR,
+      bind,
+    };
+  }
+
   onBind(
     selection: d3.Selection<HTMLElement, any, any, any>,
     state: WaveShaperState,
     xScale: d3.ScaleLinear<number, number, never>,
     yScale: d3.ScaleBand<string>
   ) {
+    const that = this;
+
     return selection
-      .selectAll<any, Interval>(`custom.${TYPES.INTERVAL.description}`)
+      .selectAll<LayoutNode, Interval>(`custom.${TYPES.INTERVAL.description}`)
       .data(state.intervals, (d) => d.id)
       .join(
-        (enter) => {
-          const container = enter
-            .append("custom")
+        (enter) =>
+          enter
+            .append<LayoutNode>("custom")
             .attr("class", TYPES.INTERVAL.description!)
-            .attr("x", (d) => xScale(actualStart(d)))
-            .attr("y", (d) => yScale(d.track)!)
-            .attr("width", (d) => getIntervalWidth(d, xScale))
-            .attr("height", yScale.bandwidth())
-            .attr("fill", (d) => this.#colorMap.get(d.track) ?? DEFAULT_COLOR)
-            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.INTERVAL))
-            .each((d) => this.summarizeAudio(d, state, xScale));
+            .each(function (d) {
+              this.__waveShaperLayout = that.#layout(d, xScale, yScale, {
+                interval: that.bindFn(d, TYPES.INTERVAL),
+                resizeLeft: that.bindFn(d, TYPES.RESIZE_LEFT),
+                resizeRight: that.bindFn(d, TYPES.RESIZE_RIGHT),
+                fadeIn: that.bindFn(d, TYPES.FADE_IN),
+                fadeOut: that.bindFn(d, TYPES.FADE_OUT),
+              });
 
-          container
-            .append("custom")
-            .attr("class", TYPES.RESIZE_LEFT.description!)
-            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.RESIZE_LEFT));
-
-          container
-            .append("custom")
-            .attr("class", TYPES.RESIZE_RIGHT.description!)
-            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.RESIZE_RIGHT));
-
-          container
-            .append("custom")
-            .attr("class", TYPES.FADE_IN.description!)
-            .attr("x", (d) => xScale(actualStart(d) + (d.fadeIn ?? 0)))
-            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.FADE_IN));
-
-          container
-            .append("custom")
-            .attr("class", TYPES.FADE_OUT.description!)
-            .attr("x", (d) => xScale(d.end - (d.fadeOut ?? 0)))
-            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.FADE_OUT));
-
-          return container;
-        },
+              that.summarizeAudio(d, state, xScale);
+            }),
         (update) => {
-          const toUpdate = update.filter(this.#filterFn);
+          // Only the filtered elements are recomputed, but the whole selection
+          // is returned: the sort below is what sets z-order, and sorting a
+          // subset would reorder the intervals against each other.
+          update.filter(this.#filterFn).each(function (d) {
+            const previous = this.__waveShaperLayout;
+            if (previous === undefined) return;
 
-          toUpdate
-            .attr("x", (d) => xScale(actualStart(d)))
-            .attr("y", (d) => yScale(d.track)!)
-            .attr("fill", (d) => this.#colorMap.get(d.track) ?? DEFAULT_COLOR)
-            .attr("width", (d) => getIntervalWidth(d, xScale))
-            .each((d) => this.summarizeAudio(d, state, xScale));
+            this.__waveShaperLayout = that.#layout(
+              d,
+              xScale,
+              yScale,
+              previous.bind
+            );
 
-          toUpdate
-            .select(`custom.${TYPES.FADE_IN.description!}`)
-            .attr("x", (d) => xScale(actualStart(d) + (d.fadeIn ?? 0)));
-
-          toUpdate
-            .select(`custom.${TYPES.FADE_OUT.description!}`)
-            .attr("x", (d) => xScale(d.end - (d.fadeOut ?? 0)));
+            that.summarizeAudio(d, state, xScale);
+          });
 
           return update;
         },
         (exit) =>
           exit
-            .each((d: Interval) => {
-              // Both caches are keyed by interval id, so they have to be
-              // released here or they grow for the lifetime of the page.
-              this.#drawDataCache.delete(d.id);
-              clearCachedData(d.id);
+            .each(function (d) {
+              // Everything keyed by interval id has to be released here or it
+              // grows for the lifetime of the page.
+              that.clearAudioCache(d.id);
+
+              const bind = this.__waveShaperLayout?.bind;
+              if (bind === undefined) return;
+
+              that.releaseFn(bind.interval);
+              that.releaseFn(bind.resizeLeft);
+              that.releaseFn(bind.resizeRight);
+              that.releaseFn(bind.fadeIn);
+              that.releaseFn(bind.fadeOut);
             })
             .remove()
       )
@@ -281,37 +339,26 @@ export class IntervalRenderer implements Renderer {
   ) {
     const that = this;
     return selection
-      .selectAll<any, Interval>(`custom.${TYPES.INTERVAL.description!}`)
+      .selectAll<LayoutNode, Interval>(`custom.${TYPES.INTERVAL.description!}`)
       .each(function (d) {
-        const node = d3.select(this);
-        const resizeLeft = node.select(
-          `custom.${TYPES.RESIZE_LEFT.description!}`
-        );
-        const resizeRight = node.select(
-          `custom.${TYPES.RESIZE_RIGHT.description!}`
-        );
-        const fadeIn = node.select(`custom.${TYPES.FADE_IN.description!}`);
-        const fadeOut = node.select(`custom.${TYPES.FADE_OUT.description!}`);
+        const layout = this.__waveShaperLayout;
+        if (layout === undefined) return;
 
-        const fillUniqueColor = node.attr(BIND_ATTR);
-        const resizeLeftUniqueColor = resizeLeft.attr(BIND_ATTR);
-        const resizeRightUniqueColor = resizeRight.attr(BIND_ATTR);
-        const fadeInUniqueColor = fadeIn.attr(BIND_ATTR);
-        const fadeOutUniqueColor = fadeOut.attr(BIND_ATTR);
+        const bind = layout.bind;
 
-        const fillColor = toHidden ? fillUniqueColor : node.attr("fill");
-        const waveColor = toHidden ? fillUniqueColor : "black";
-        const resizeLeftColor = toHidden ? resizeLeftUniqueColor : "black";
-        const resizeRightColor = toHidden ? resizeRightUniqueColor : "black";
-        const fadeInColor = toHidden ? fadeInUniqueColor : "purple";
-        const fadeOutColor = toHidden ? fadeOutUniqueColor : "purple";
+        const fillColor = toHidden ? bind.interval : layout.fill;
+        const waveColor = toHidden ? bind.interval : "black";
+        const resizeLeftColor = toHidden ? bind.resizeLeft : "black";
+        const resizeRightColor = toHidden ? bind.resizeRight : "black";
+        const fadeInColor = toHidden ? bind.fadeIn : "purple";
+        const fadeOutColor = toHidden ? bind.fadeOut : "purple";
 
-        const x = getDrawValue(+node.attr("x"), toHidden);
-        const y = getDrawValue(+node.attr("y"), toHidden);
-        const width = getDrawValue(+node.attr("width"), toHidden);
-        const height = getDrawValue(+node.attr("height"), toHidden);
-        const fadeInX = getDrawValue(+fadeIn.attr("x"), toHidden);
-        const fadeOutX = getDrawValue(+fadeOut.attr("x"), toHidden);
+        const x = getDrawValue(layout.x, toHidden);
+        const y = getDrawValue(layout.y, toHidden);
+        const width = getDrawValue(layout.width, toHidden);
+        const height = getDrawValue(layout.height, toHidden);
+        const fadeInX = getDrawValue(layout.fadeInX, toHidden);
+        const fadeOutX = getDrawValue(layout.fadeOutX, toHidden);
 
         // background
         context.fillStyle = fillColor;
@@ -368,9 +415,9 @@ export class IntervalRenderer implements Renderer {
     data: Interval,
     xScale: d3.ScaleLinear<number, number>
   ) {
-    if (e.metaKey) {
+    if (this.hasModifier(e)) {
       // get the x position of the click
-      const [x, y] = d3.pointer(e);
+      const [x] = d3.pointer(e, e.currentTarget as Element);
       const timeCut = xScale.invert(x);
 
       // create a new interval
@@ -477,6 +524,7 @@ function renderFades(
   if (toHidden === false) {
     // background
     context.fillStyle = "rgba(0,0,0,0.2)";
+    context.strokeStyle = "black";
     context.fillRect(x, y, fadeInX - x, height);
 
     // line

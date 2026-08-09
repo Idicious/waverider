@@ -31,7 +31,9 @@ test.describe("summarizeAudio", () => {
     // detached from the audio underneath it.
     const worst = await page.evaluate(
       async ({ url, sampleRate, spp }) => {
-        const { summarizeAudio } = await import(url);
+        const { AudioSummaryCache } = await import(url);
+        const cache = new AudioSummaryCache();
+        const summarizeAudio = cache.summarize.bind(cache);
 
         const data = new Float32Array(sampleRate * 10);
         for (let i = 0; i < data.length; i++) data[i] = Math.sin(i / 50) * 0.8;
@@ -71,7 +73,9 @@ test.describe("summarizeAudio", () => {
   test("reuses cached pixels when either edge is resized", async ({ page }) => {
     const worst = await page.evaluate(
       async ({ url, sampleRate, spp }) => {
-        const { summarizeAudio } = await import(url);
+        const { AudioSummaryCache } = await import(url);
+        const cache = new AudioSummaryCache();
+        const summarizeAudio = cache.summarize.bind(cache);
 
         const data = new Float32Array(sampleRate * 10);
         for (let i = 0; i < data.length; i++) data[i] = Math.sin(i / 37) * 0.7;
@@ -112,7 +116,9 @@ test.describe("summarizeAudio", () => {
     // were computed for a different samples-per-pixel.
     const result = await page.evaluate(
       async ({ url, sampleRate }) => {
-        const { summarizeAudio } = await import(url);
+        const { AudioSummaryCache } = await import(url);
+        const cache = new AudioSummaryCache();
+        const summarizeAudio = cache.summarize.bind(cache);
 
         const data = new Float32Array(sampleRate * 10);
         for (let i = 0; i < data.length; i++) data[i] = Math.sin(i / 50) * 0.8;
@@ -144,7 +150,10 @@ test.describe("summarizeAudio", () => {
     // AudioContext.sampleRate, which is 48kHz on most hardware.
     const result = await page.evaluate(
       async ({ url }) => {
-        const { summarizeAudio, DRAW_STRIDE } = await import(url);
+        const { AudioSummaryCache } = await import(url);
+        const cache = new AudioSummaryCache();
+        const summarizeAudio = cache.summarize.bind(cache);
+        const { DRAW_STRIDE } = await import(url);
 
         const measure = (sampleRate: number) => {
           const data = new Float32Array(sampleRate * 2);
@@ -190,7 +199,10 @@ test.describe("summarizeAudio", () => {
     // out the last pixel of every clip.
     const pixels = await page.evaluate(
       async ({ url, sampleRate }) => {
-        const { summarizeAudio, DRAW_STRIDE } = await import(url);
+        const { AudioSummaryCache } = await import(url);
+        const cache = new AudioSummaryCache();
+        const summarizeAudio = cache.summarize.bind(cache);
+        const { DRAW_STRIDE } = await import(url);
 
         const data = new Float32Array(sampleRate).fill(0.5); // exactly 1000ms
         // window runs 200ms past the end of the audio
@@ -219,7 +231,10 @@ test.describe("summarizeAudio", () => {
   }) => {
     const result = await page.evaluate(
       async ({ url, sampleRate }) => {
-        const { summarizeAudio, DRAW_STRIDE } = await import(url);
+        const { AudioSummaryCache } = await import(url);
+        const cache = new AudioSummaryCache();
+        const summarizeAudio = cache.summarize.bind(cache);
+        const { DRAW_STRIDE } = await import(url);
 
         // a quiet tone with a short loud transient in every pixel
         const spp = 441;
@@ -251,7 +266,10 @@ test.describe("summarizeAudio", () => {
     // the height of each half tracked how often the signal was positive
     const result = await page.evaluate(
       async ({ url, sampleRate }) => {
-        const { summarizeAudio, DRAW_STRIDE } = await import(url);
+        const { AudioSummaryCache } = await import(url);
+        const cache = new AudioSummaryCache();
+        const summarizeAudio = cache.summarize.bind(cache);
+        const { DRAW_STRIDE } = await import(url);
 
         const measure = (label: string, positive: (i: number) => boolean) => {
           const data = new Float32Array(sampleRate);
@@ -278,7 +296,10 @@ test.describe("summarizeAudio", () => {
   test("keeps the rms band inside the peak outline", async ({ page }) => {
     const violations = await page.evaluate(
       async ({ url, sampleRate }) => {
-        const { summarizeAudio, DRAW_STRIDE } = await import(url);
+        const { AudioSummaryCache } = await import(url);
+        const cache = new AudioSummaryCache();
+        const summarizeAudio = cache.summarize.bind(cache);
+        const { DRAW_STRIDE } = await import(url);
 
         let violations = 0;
 
@@ -320,7 +341,10 @@ test.describe("summarizeAudio", () => {
   }) => {
     const worst = await page.evaluate(
       async ({ url, sampleRate }) => {
-        const { summarizeAudio, clearCachedData } = await import(url);
+        const { AudioSummaryCache } = await import(url);
+        const cache = new AudioSummaryCache();
+        const summarizeAudio = cache.summarize.bind(cache);
+        const clearCachedData = cache.clear.bind(cache);
 
         const data = new Float32Array(sampleRate * 2);
         for (let i = 0; i < data.length; i++) data[i] = Math.sin(i / 50) * 0.8;
@@ -349,7 +373,9 @@ test.describe("summarizeAudio", () => {
   }) => {
     const lengths = await page.evaluate(
       async ({ url, sampleRate }) => {
-        const { summarizeAudio } = await import(url);
+        const { AudioSummaryCache } = await import(url);
+        const cache = new AudioSummaryCache();
+        const summarizeAudio = cache.summarize.bind(cache);
         const data = new Float32Array(sampleRate);
 
         return [

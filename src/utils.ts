@@ -1,6 +1,31 @@
-import type { Selection } from "./types";
+import type { ModifierKey, Selection } from "./types";
 
 export const ALWAYS = () => true;
+
+/** Just the parts of an event the modifier check needs. */
+export type ModifierEvent = { metaKey: boolean; ctrlKey: boolean };
+
+let platformModifier: ModifierKey | null = null;
+
+/**
+ * Cmd on macOS, Ctrl everywhere else, matching what each platform uses for
+ * the equivalent gestures in native applications.
+ */
+export function getPlatformModifierKey(): ModifierKey {
+  if (platformModifier !== null) return platformModifier;
+
+  // userAgentData is not on Safari or Firefox, and navigator.platform is
+  // deprecated but still the only thing present everywhere.
+  const platform =
+    (navigator as any).userAgentData?.platform ?? navigator.platform ?? "";
+
+  platformModifier = /mac|iphone|ipad|ipod/i.test(platform) ? "meta" : "ctrl";
+  return platformModifier;
+}
+
+export function hasModifier(e: ModifierEvent, key: ModifierKey) {
+  return key === "meta" ? e.metaKey : e.ctrlKey;
+}
 
 export function invertYScale(yScale: d3.ScaleBand<string>, y: number) {
   const eachBand = yScale.step();

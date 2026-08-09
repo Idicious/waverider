@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { getScales, loadPage, pan } from "./utils";
+import { getModifier, getScales, loadPage, pan } from "./utils";
 
 /**
  * Nothing in the scene animates, so the loop should sit idle until something
@@ -97,10 +97,12 @@ test("repaints on zoom and pan", async ({ page }) => {
   // not the shared zoom helper: it feeds canvas relative coordinates to
   // page.mouse, which wants viewport ones, so the wheel misses the canvas
   const box = (await (await page.$("canvas"))!.boundingBox())!;
+  const modifier = await getModifier(page);
+
   await page.mouse.move(box.x + 200, box.y + 100);
-  await page.keyboard.down("Meta");
+  await page.keyboard.down(modifier);
   await page.mouse.wheel(0, -600);
-  await page.keyboard.up("Meta");
+  await page.keyboard.up(modifier);
 
   await page.waitForFunction(
     (previous) =>

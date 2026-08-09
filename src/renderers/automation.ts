@@ -11,8 +11,12 @@ import type {
   UpdateFn,
   WaveShaperState,
 } from "../types";
-import { BIND_ATTR } from "../bind";
-import { ALWAYS, getDrawValue, invertYScale } from "../utils";
+import {
+  ALWAYS,
+  getDrawValue,
+  invertYScale,
+  type ModifierEvent,
+} from "../utils";
 
 export const AUTOMATION_HANDLE_RADIUS = 5;
 
@@ -28,10 +32,23 @@ type AutomationBindData = {
   point: AutomationPoint;
 };
 
+/**
+ * Drawing geometry held on the element as a property rather than as
+ * attributes, so the render pass reads numbers instead of parsing strings.
+ * See the same pattern in the interval renderer.
+ */
+type LaneLayout = { y: number; bind: string };
+type PointLayout = { x: number; y: number; r: number; fill: string; bind: string };
+
+type LaneNode = Element & { __waveShaperLane?: LaneLayout };
+type PointNode = Element & { __waveShaperPoint?: PointLayout };
+
 export class AutomationRenderer implements Renderer {
   #automationMap = new Map<string, Automation>();
   #automationPointMap = new Map<string, AutomationPoint>();
   #automationDataMap = new Map<string, AutomationData>();
+  /** A track can carry several automation lanes, so this is one to many. */
+  #automationDataByTrack = new Map<string, AutomationData[]>();
   #filterFn: Predicate = ALWAYS;
   #hoverX: number | null = null;
   #hoverY: number | null = null;
@@ -50,7 +67,9 @@ export class AutomationRenderer implements Renderer {
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly bindFn: (data: unknown, type: symbol) => string,
-    private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void
+    private readonly releaseFn: (color: string) => void,
+    private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
+    private readonly hasModifier: (e: ModifierEvent) => boolean
   ) {}
 
   onSelectStart(
@@ -68,29 +87,33 @@ export class AutomationRenderer implements Renderer {
     xScale: ScaleLinear<number, number>,
     yScale: ScaleBand<string>
   ) {
-    if (!this.#selectedTrack) return;
+    if (this.#selectedTrack == null) return;
 
-    const automationData = this.#automationDataMap.get(this.#selectedTrack);
-    if (!automationData) return;
+    // Keyed by track, not by automationData id - those are different id spaces
+    // and only coincide in the demo data.
+    const lanes = this.#automationDataByTrack.get(this.#selectedTrack);
+    if (lanes === undefined) return;
 
-    for (const point of automationData.points) {
-      const { x, y } = getPointPosition(
-        automationData.track,
-        point.time,
-        point.value,
-        xScale,
-        yScale
-      );
+    for (const automationData of lanes) {
+      for (const point of automationData.points) {
+        const { x, y } = getPointPosition(
+          automationData.track,
+          point.time,
+          point.value,
+          xScale,
+          yScale
+        );
 
-      if (
-        x >= selection.x1 &&
-        x <= selection.x2 &&
-        y >= selection.y1 &&
-        y <= selection.y2
-      ) {
-        this.#selectedSet.add(point.id);
-      } else {
-        this.#selectedSet.delete(point.id);
+        if (
+          x >= selection.x1 &&
+          x <= selection.x2 &&
+          y >= selection.y1 &&
+          y <= selection.y2
+        ) {
+          this.#selectedSet.add(point.id);
+        } else {
+          this.#selectedSet.delete(point.id);
+        }
       }
     }
   }
@@ -99,6 +122,7 @@ export class AutomationRenderer implements Renderer {
     this.#automationMap.clear();
     this.#automationDataMap.clear();
     this.#automationPointMap.clear();
+    this.#automationDataByTrack.clear();
 
     for (const automation of state.automation) {
       this.#automationMap.set(automation.id, automation);
@@ -106,6 +130,10 @@ export class AutomationRenderer implements Renderer {
 
     for (const automationData of state.automationData) {
       this.#automationDataMap.set(automationData.id, automationData);
+
+      const forTrack = this.#automationDataByTrack.get(automationData.track);
+      if (forTrack) forTrack.push(automationData);
+      else this.#automationDataByTrack.set(automationData.track, [automationData]);
     }
 
     for (const point of state.automationData.flatMap((data) => data.points)) {
@@ -239,56 +267,78 @@ export class AutomationRenderer implements Renderer {
       }))
     );
 
+    const that = this;
+
     selection
-      .selectAll<Element, AutomationData>(
+      .selectAll<LaneNode, AutomationData>(
         `custom.${TYPES.AUTOMATION.description}`
       )
       .data(state.automationData, (d) => d.id)
       .join(
-        (enter) => {
-          return enter
-            .append("custom")
+        (enter) =>
+          enter
+            .append<LaneNode>("custom")
             .attr("class", TYPES.AUTOMATION.description!)
-            .attr("y", (d) => yScale(d.track)!)
-            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.AUTOMATION))
-            .each((d) => d.points.sort((a, b) => a.time - b.time));
-        },
-        (update) => {
-          return update
-            .filter(this.#filterFn)
-            .attr("y", (d) => yScale(d.track)!)
-            .each((d) => d.points.sort((a, b) => a.time - b.time));
-        },
-        (remove) => remove.remove()
+            .each(function (d) {
+              this.__waveShaperLane = {
+                y: yScale(d.track)!,
+                bind: that.bindFn(d, TYPES.AUTOMATION),
+              };
+
+              d.points.sort((a, b) => a.time - b.time);
+            }),
+        (update) =>
+          update.filter(this.#filterFn).each(function (d) {
+            const lane = this.__waveShaperLane;
+            if (lane !== undefined) lane.y = yScale(d.track)!;
+
+            d.points.sort((a, b) => a.time - b.time);
+          }),
+        (remove) =>
+          remove
+            .each(function () {
+              const lane = this.__waveShaperLane;
+              if (lane !== undefined) that.releaseFn(lane.bind);
+            })
+            .remove()
       );
 
     selection
-      .selectAll<Element, AutomationBindData>(
+      .selectAll<PointNode, AutomationBindData>(
         `custom.${TYPES.AUTOMATION_POINT.description}`
       )
       .data(points, (d) => d.point.id)
       .join(
-        (enter) => {
-          return enter
-            .append("custom")
+        (enter) =>
+          enter
+            .append<PointNode>("custom")
             .attr("class", TYPES.AUTOMATION_POINT.description!)
-            .attr(BIND_ATTR, (d) => this.bindFn(d, TYPES.AUTOMATION_POINT))
-            .attr("r", AUTOMATION_HANDLE_RADIUS)
-            .attr("x", (d) => xScale(d.point.time))
-            .attr("fill", "purple")
-            .attr("y", (d) => {
-              return yScale(d.track)! + (1 - d.point.value) * trackHeight;
-            });
-        },
-        (update) => {
-          return update
+            .each(function (d) {
+              this.__waveShaperPoint = {
+                x: xScale(d.point.time),
+                y: yScale(d.track)! + (1 - d.point.value) * trackHeight,
+                r: AUTOMATION_HANDLE_RADIUS,
+                fill: "purple",
+                bind: that.bindFn(d, TYPES.AUTOMATION_POINT),
+              };
+            }),
+        (update) =>
+          update
             .filter((d) => this.#filterFn(d))
-            .attr("x", (d) => xScale(d.point.time))
-            .attr("y", (d) => {
-              return yScale(d.track)! + (1 - d.point.value) * trackHeight;
-            });
-        },
-        (remove) => remove.remove()
+            .each(function (d) {
+              const point = this.__waveShaperPoint;
+              if (point === undefined) return;
+
+              point.x = xScale(d.point.time);
+              point.y = yScale(d.track)! + (1 - d.point.value) * trackHeight;
+            }),
+        (remove) =>
+          remove
+            .each(function () {
+              const point = this.__waveShaperPoint;
+              if (point !== undefined) that.releaseFn(point.bind);
+            })
+            .remove()
       );
   }
 
@@ -304,28 +354,39 @@ export class AutomationRenderer implements Renderer {
 
     const that = this;
     const trackHeight = yScale.bandwidth();
+    // The drawing space is CSS pixels; ctx.canvas.width is device pixels and
+    // overshoots by devicePixelRatio.
+    const width = state.configuration.width;
 
     selection
-      .selectAll<any, AutomationData>(`custom.${TYPES.AUTOMATION.description}`)
+      .selectAll<LaneNode, AutomationData>(
+        `custom.${TYPES.AUTOMATION.description}`
+      )
       .each(function (d) {
-        const node = d3.select(this);
+        const lane = this.__waveShaperLane;
+        if (lane === undefined) return;
 
-        const uniqueColor = node.attr(BIND_ATTR);
-
-        const fillColor = toHidden ? uniqueColor : "rgba(0,0,0,0.2)";
-        const yStart = +node.attr("y");
+        const fillColor = toHidden ? lane.bind : "rgba(0,0,0,0.2)";
+        const yStart = lane.y;
 
         ctx.fillStyle = fillColor;
-        ctx.fillRect(0, yStart, ctx.canvas.width, trackHeight);
+        ctx.fillRect(0, yStart, width, trackHeight);
 
         if (toHidden) return;
 
         const automation = that.#automationMap.get(d.automation)!;
+        const last = d.points[d.points.length - 1];
+
+        // A lane with no points is a flat line at the origin rather than a
+        // crash on the trailing segment.
+        const originY = yStart + trackHeight * automation.origin;
+        const endY =
+          last === undefined ? originY : yStart + trackHeight * (1 - last.value);
 
         ctx.strokeStyle = "black";
         ctx.beginPath();
         // start at origin
-        ctx.moveTo(0, yStart + trackHeight * automation.origin);
+        ctx.moveTo(0, originY);
 
         // draw lines between automation points
         for (const point of d.points) {
@@ -335,31 +396,28 @@ export class AutomationRenderer implements Renderer {
         }
 
         // end at value of last point
-        ctx.lineTo(
-          ctx.canvas.width,
-          yStart + trackHeight * (1 - d.points[d.points.length - 1].value)
-        );
+        ctx.lineTo(width, endY);
         ctx.stroke();
       });
 
     selection
-      .selectAll<any, AutomationBindData>(
+      .selectAll<PointNode, AutomationBindData>(
         `custom.${TYPES.AUTOMATION_POINT.description}`
       )
       .each(function (d) {
-        const node = d3.select(this);
+        const point = this.__waveShaperPoint;
+        if (point === undefined) return;
 
-        const uniqueColor = node.attr(BIND_ATTR);
         const selected = that.#selectedSet.has(d.point.id);
         const fillColor = toHidden
-          ? uniqueColor
+          ? point.bind
           : selected
           ? "red"
-          : node.attr("fill");
+          : point.fill;
 
-        const x = getDrawValue(+node.attr("x"), toHidden);
-        const y = getDrawValue(+node.attr("y"), toHidden);
-        const r = getDrawValue(+node.attr("r"), toHidden);
+        const x = getDrawValue(point.x, toHidden);
+        const y = getDrawValue(point.y, toHidden);
+        const r = getDrawValue(point.r, toHidden);
 
         ctx.fillStyle = fillColor;
 
@@ -373,7 +431,8 @@ export class AutomationRenderer implements Renderer {
         }
       });
 
-    if (this.#hoverX && this.#hoverY && !toHidden) {
+    // 0 is a real coordinate: the left edge, and the top of the first track.
+    if (this.#hoverX != null && this.#hoverY != null && !toHidden) {
       ctx.fillStyle = "black";
       ctx.fillRect(this.#hoverX, this.#hoverY, 1, trackHeight);
     }
@@ -427,7 +486,7 @@ export class AutomationRenderer implements Renderer {
     d: BoundData<AutomationData>,
     xScale: ScaleLinear<number, number>
   ) {
-    if (e.metaKey) {
+    if (this.hasModifier(e)) {
       const [x] = d3.pointer(e, this.canvas);
       const time = xScale.invert(x);
 

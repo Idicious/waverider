@@ -60,11 +60,21 @@ export interface WaveShaperState {
   configuration: WaveShaperConfig;
 }
 
+/** Modifier that gates zoom, pan, cutting and adding automation points. */
+export type ModifierKey = "meta" | "ctrl";
+
 export type WaveShaperConfig = {
   // render area dimensions
   width: number;
   height: number;
   trackHeight: number;
+
+  /**
+   * Which modifier gates the zoom, pan, cut and add-point gestures. Defaults
+   * to the platform convention - Cmd on macOS, Ctrl elsewhere - because
+   * hardcoding Meta leaves Windows and Linux with no way to reach any of them.
+   */
+  modifierKey?: ModifierKey;
 
   // zoom / pan options
   samplesPerPixel: number;
@@ -146,6 +156,9 @@ export type Renderer = {
   ) => void;
 
   onStateUpdate?: (state: WaveShaperState) => void;
+
+  /** Release anything held for the lifetime of the owning WaveShaper. */
+  onDestroy?: () => void;
 
   onDrag?: (
     e: d3.D3DragEvent<any, any, any>,
