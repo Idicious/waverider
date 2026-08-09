@@ -1,4 +1,4 @@
-import { Selection } from "./types";
+import type { Selection } from "./types";
 
 export const ALWAYS = () => true;
 

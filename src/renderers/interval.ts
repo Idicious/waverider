@@ -1,15 +1,17 @@
 import * as d3 from "d3";
-import {
+import type {
   Renderer,
   Interval,
   WaveShaperState,
   UpdateFn,
   BoundData,
   Predicate,
+  AudioData,
 } from "../types";
 import { BIND_ATTR } from "../bind";
 import { ALWAYS, getDrawValue, invertYScale } from "../utils";
-import { summarizeAudio } from "../audio";
+import { clearCachedData, summarizeAudio, DRAW_STRIDE } from "../audio";
+import type { DrawData } from "../audio";
 
 export const TYPES = {
   INTERVAL: Symbol("interval"),
@@ -31,10 +33,11 @@ export class IntervalRenderer implements Renderer {
   TYPE = Symbol("intervals");
 
   #filterFn: Predicate = ALWAYS;
-  #drawDataCache = new Map<string, [number, number][]>();
+  #drawDataCache = new Map<string, DrawData>();
   #bindFilter = { type: this.TYPE } as const;
-  #zoomFactor = 1;
   #colorMap = new Map<string, string>();
+  #audioDataMap = new Map<string, AudioData>();
+  #audioDataSource: AudioData[] | null = null;
 
   #resetFilter = () => {
     this.#filterFn = ALWAYS;
@@ -42,12 +45,9 @@ export class IntervalRenderer implements Renderer {
 
   constructor(
     private readonly bindFn: (data: Interval, type: symbol) => string,
-    private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void
+    private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
+    private readonly sampleRate: number
   ) {}
-
-  onZoom(e: d3.D3ZoomEvent<any, any>) {
-    this.#zoomFactor = e.transform.k;
-  }
 
   onStateUpdate(state: WaveShaperState) {
     this.#colorMap.clear();
@@ -138,6 +138,24 @@ export class IntervalRenderer implements Renderer {
     }
   }
 
+  /**
+   * Audio is looked up by id on every bind, so keep it in a map. This is
+   * rebuilt on identity rather than in onStateUpdate because binding runs
+   * before the state update handlers on the very first render.
+   */
+  #getAudioData(state: WaveShaperState, id: string) {
+    if (this.#audioDataSource !== state.audioData) {
+      this.#audioDataSource = state.audioData;
+      this.#audioDataMap.clear();
+
+      for (const audio of state.audioData) {
+        this.#audioDataMap.set(audio.id, audio);
+      }
+    }
+
+    return this.#audioDataMap.get(id);
+  }
+
   summarizeAudio(
     interval: Interval,
     state: WaveShaperState,
@@ -147,18 +165,18 @@ export class IntervalRenderer implements Renderer {
     const valueZero = xScale.invert(0);
     const valueEnd = xScale.invert(state.configuration.width);
     const msPerPixel = valueOne - valueZero;
-    const samplesPerPixel = msPerPixel * 44.1;
+    const samplesPerPixel = (msPerPixel * this.sampleRate) / 1000;
     const start = actualStart(interval);
 
     const msIntoInterval = Math.max(valueZero, start) - start;
     const intervalScreenDuration =
       Math.min(valueEnd, interval.end) - Math.max(valueZero, start);
 
-    const audioData = state.audioData.find((a) => a.id === interval.data);
+    const audioData = this.#getAudioData(state, interval.data);
 
     // Interval is not in viewport, render nothing
     if (intervalScreenDuration <= 0 || audioData === undefined) {
-      this.#drawDataCache.set(interval.id, []);
+      this.#drawDataCache.delete(interval.id);
     } else {
       this.#drawDataCache.set(
         interval.id,
@@ -168,7 +186,7 @@ export class IntervalRenderer implements Renderer {
           msIntoInterval + interval.offsetStart,
           intervalScreenDuration,
           samplesPerPixel,
-          this.#zoomFactor
+          this.sampleRate
         )
       );
     }
@@ -240,7 +258,15 @@ export class IntervalRenderer implements Renderer {
 
           return update;
         },
-        (exit) => exit.remove()
+        (exit) =>
+          exit
+            .each((d: Interval) => {
+              // Both caches are keyed by interval id, so they have to be
+              // released here or they grow for the lifetime of the page.
+              this.#drawDataCache.delete(d.id);
+              clearCachedData(d.id);
+            })
+            .remove()
       )
       .sort((a, b) => a.index - b.index);
   }
@@ -293,16 +319,19 @@ export class IntervalRenderer implements Renderer {
 
         // audio waveform, not interactive so only render to display canvas
         if (toHidden === false) {
-          const data = that.#drawDataCache.get(d.id) ?? [];
-          renderWave(
-            data,
-            height,
-            Math.max(0, x),
-            y,
-            Math.min(Math.floor(width), data.length),
-            context,
-            waveColor
-          );
+          const data = that.#drawDataCache.get(d.id);
+          if (data !== undefined) {
+            renderWave(
+              data,
+              height,
+              Math.max(0, x),
+              y,
+              Math.min(Math.floor(width), data.length / DRAW_STRIDE),
+              context,
+              waveColor,
+              state.configuration.showRmsBand
+            );
+          }
         }
 
         // left resize handle
@@ -371,37 +400,65 @@ export class IntervalRenderer implements Renderer {
   }
 }
 
+/**
+ * The peak outline is drawn washed out and the RMS band solid on top of it, so
+ * the loud part of a pixel reads differently from its transients. With the
+ * band turned off the outline is drawn solid instead - the wash only exists to
+ * contrast with the band.
+ */
+const WAVE_PEAK_ALPHA = 0.45;
+
 export function renderWave(
-  data: [number, number][],
+  data: DrawData,
   height: number,
   x: number,
   y: number,
   width: number,
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  color: string
+  color: string,
+  showRmsBand: boolean
 ) {
   const scale = height / 2;
   const end = x + width;
 
   const center = y + scale;
 
+  /** Fills between the centre line and a min/max pair of the packed summary. */
+  const envelope = (minOffset: number, maxOffset: number) => {
+    const region = new Path2D();
+
+    region.moveTo(x, center);
+    for (let i = 0; i < width; i++) {
+      const value = data[i * DRAW_STRIDE + minOffset];
+      region.lineTo(i + x, Math.ceil(value * scale + center));
+    }
+    region.lineTo(end, center);
+
+    region.moveTo(x, center);
+    for (let i = 0; i < width; i++) {
+      const value = data[i * DRAW_STRIDE + maxOffset];
+      region.lineTo(i + x, Math.ceil(value * scale + center));
+    }
+    region.lineTo(end, center);
+    region.closePath();
+
+    return region;
+  };
+
   ctx.fillStyle = color;
-  const region = new Path2D();
 
-  region.moveTo(x, center);
-  for (let i = 0; i < width; i++) {
-    region.lineTo(i + x, Math.ceil(data[i][0] * scale + center));
+  if (!showRmsBand) {
+    ctx.fill(envelope(0, 1));
+    return;
   }
-  region.lineTo(end, center);
 
-  region.moveTo(x, center);
-  for (let i = 0; i < width; i++) {
-    region.lineTo(i + x, Math.ceil(data[i][1] * scale + center));
-  }
-  region.lineTo(end, center);
-  region.closePath();
+  const alpha = ctx.globalAlpha;
 
-  ctx.fill(region);
+  ctx.globalAlpha = alpha * WAVE_PEAK_ALPHA;
+  ctx.fill(envelope(0, 1));
+
+  ctx.globalAlpha = alpha;
+  ctx.fill(envelope(2, 3));
 }
 
 function renderFades(

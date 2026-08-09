@@ -221,7 +221,8 @@ export class WaveShaper {
     this.registerRenderer(
       new IntervalRenderer(
         this.bindData.bind(this),
-        this.updateState.bind(this)
+        this.updateState.bind(this),
+        this.autoContext.sampleRate
       )
     );
 
