@@ -41,122 +41,136 @@ export interface CacheData {
 
 const EMPTY: DrawData = new Float32Array(0);
 
-const cache = new Map<string, CacheData>();
-
 /**
- * Summarize the audio behind a time window into one min/max pair per pixel.
+ * Holds the per-key summaries for one WaveShaper.
  *
- * Pixels are placed on a grid anchored at sample 0, so the samples behind a
- * pixel depend only on its absolute grid index. That makes the summary stable
- * under panning, cutting and zooming: a pixel that is still on screen after a
- * pan describes exactly the same samples, so it can be moved into its new
- * position rather than recomputed.
- *
- * @param spp samples per pixel, i.e. the current zoom level
+ * This is an instance rather than a module global because keys are interval
+ * ids: two WaveShapers on a page draw different audio under the same ids, and
+ * sharing one cache between them hands each the other's pixels.
  */
-export function summarizeAudio(
-  data: Float32Array,
-  cacheKey: string,
-  startMs: number,
-  durationMs: number,
-  spp: number,
-  sampleRate: number
-): DrawData {
-  if (spp <= 0 || durationMs <= 0 || sampleRate <= 0) return EMPTY;
+export class AudioSummaryCache {
+  #cache = new Map<string, CacheData>();
 
-  const samplesPerMs = sampleRate / 1000;
-  const startPixel = Math.round((startMs * samplesPerMs) / spp);
-  const width = Math.round((durationMs * samplesPerMs) / spp);
+  /**
+   * Summarize the audio behind a time window into one min/max pair per pixel.
+   *
+   * Pixels are placed on a grid anchored at sample 0, so the samples behind a
+   * pixel depend only on its absolute grid index. That makes the summary
+   * stable under panning, cutting and zooming: a pixel that is still on screen
+   * after a pan describes exactly the same samples, so it can be moved into
+   * its new position rather than recomputed.
+   *
+   * @param spp samples per pixel, i.e. the current zoom level
+   */
+  summarize(
+    data: Float32Array,
+    cacheKey: string,
+    startMs: number,
+    durationMs: number,
+    spp: number,
+    sampleRate: number
+  ): DrawData {
+    if (spp <= 0 || durationMs <= 0 || sampleRate <= 0) return EMPTY;
 
-  if (width <= 0) return EMPTY;
+    const samplesPerMs = sampleRate / 1000;
+    const startPixel = Math.round((startMs * samplesPerMs) / spp);
+    const width = Math.round((durationMs * samplesPerMs) / spp);
 
-  const { drawData, gaps } = reuseCachedData(
-    cacheKey,
-    startPixel,
-    width,
-    spp,
-    sampleRate
-  );
+    if (width <= 0) return EMPTY;
 
-  for (const [from, to] of gaps) {
-    summarizeRange(data, drawData, startPixel, from, to, spp);
-  }
-
-  cache.set(cacheKey, { startPixel, width, spp, sampleRate, drawData });
-
-  return drawData;
-}
-
-/**
- * Drop the summary held for a key. Call this when the thing being summarized
- * goes away, otherwise the cache grows for the lifetime of the page.
- */
-export function clearCachedData(cacheKey: string) {
-  cache.delete(cacheKey);
-}
-
-/**
- * Position the pixels we already have for this key, and report which ranges
- * still need to be computed.
- */
-function reuseCachedData(
-  cacheKey: string,
-  startPixel: number,
-  width: number,
-  spp: number,
-  sampleRate: number
-): { drawData: DrawData; gaps: Array<[number, number]> } {
-  const size = width * DRAW_STRIDE;
-  const cached = cache.get(cacheKey);
-
-  // A change in zoom level or sample rate moves every pixel onto a different
-  // grid, so nothing can be carried over.
-  const reusable =
-    cached !== undefined &&
-    cached.spp === spp &&
-    cached.sampleRate === sampleRate;
-
-  if (!reusable) {
-    return { drawData: new Float32Array(size), gaps: [[0, width]] };
-  }
-
-  // Overlap between the cached window and the requested one, in grid pixels.
-  const from = Math.max(startPixel, cached!.startPixel);
-  const to = Math.min(startPixel + width, cached!.startPixel + cached!.width);
-  const overlap = to - from;
-
-  if (overlap <= 0) {
-    return { drawData: new Float32Array(size), gaps: [[0, width]] };
-  }
-
-  const source = from - cached!.startPixel;
-  const target = from - startPixel;
-
-  let drawData: DrawData;
-  if (cached!.drawData.length === size) {
-    // Same width: shift in place, which is the common case while panning.
-    drawData = cached!.drawData;
-    drawData.copyWithin(
-      target * DRAW_STRIDE,
-      source * DRAW_STRIDE,
-      (source + overlap) * DRAW_STRIDE
+    const { drawData, gaps } = this.#reuseCachedData(
+      cacheKey,
+      startPixel,
+      width,
+      spp,
+      sampleRate
     );
-  } else {
-    drawData = new Float32Array(size);
-    drawData.set(
-      cached!.drawData.subarray(
+
+    for (const [from, to] of gaps) {
+      summarizeRange(data, drawData, startPixel, from, to, spp);
+    }
+
+    this.#cache.set(cacheKey, { startPixel, width, spp, sampleRate, drawData });
+
+    return drawData;
+  }
+
+  /**
+   * Drop the summary held for a key. Call this when the thing being summarized
+   * goes away, otherwise the cache grows for the lifetime of the page.
+   */
+  clear(cacheKey: string) {
+    this.#cache.delete(cacheKey);
+  }
+
+  /** Drop every summary, for when the whole instance is being torn down. */
+  clearAll() {
+    this.#cache.clear();
+  }
+
+  /**
+   * Position the pixels we already have for this key, and report which ranges
+   * still need to be computed.
+   */
+  #reuseCachedData(
+    cacheKey: string,
+    startPixel: number,
+    width: number,
+    spp: number,
+    sampleRate: number
+  ): { drawData: DrawData; gaps: Array<[number, number]> } {
+    const size = width * DRAW_STRIDE;
+    const cached = this.#cache.get(cacheKey);
+
+    // A change in zoom level or sample rate moves every pixel onto a different
+    // grid, so nothing can be carried over.
+    const reusable =
+      cached !== undefined &&
+      cached.spp === spp &&
+      cached.sampleRate === sampleRate;
+
+    if (!reusable) {
+      return { drawData: new Float32Array(size), gaps: [[0, width]] };
+    }
+
+    // Overlap between the cached window and the requested one, in grid pixels.
+    const from = Math.max(startPixel, cached!.startPixel);
+    const to = Math.min(startPixel + width, cached!.startPixel + cached!.width);
+    const overlap = to - from;
+
+    if (overlap <= 0) {
+      return { drawData: new Float32Array(size), gaps: [[0, width]] };
+    }
+
+    const source = from - cached!.startPixel;
+    const target = from - startPixel;
+
+    let drawData: DrawData;
+    if (cached!.drawData.length === size) {
+      // Same width: shift in place, which is the common case while panning.
+      drawData = cached!.drawData;
+      drawData.copyWithin(
+        target * DRAW_STRIDE,
         source * DRAW_STRIDE,
         (source + overlap) * DRAW_STRIDE
-      ),
-      target * DRAW_STRIDE
-    );
+      );
+    } else {
+      drawData = new Float32Array(size);
+      drawData.set(
+        cached!.drawData.subarray(
+          source * DRAW_STRIDE,
+          (source + overlap) * DRAW_STRIDE
+        ),
+        target * DRAW_STRIDE
+      );
+    }
+
+    const gaps: Array<[number, number]> = [];
+    if (target > 0) gaps.push([0, target]);
+    if (target + overlap < width) gaps.push([target + overlap, width]);
+
+    return { drawData, gaps };
   }
-
-  const gaps: Array<[number, number]> = [];
-  if (target > 0) gaps.push([0, target]);
-  if (target + overlap < width) gaps.push([target + overlap, width]);
-
-  return { drawData, gaps };
 }
 
 /**
@@ -194,18 +208,38 @@ function summarizeRange(
     // the centre out to its level instead of a detached sliver.
     let min = 0;
     let max = 0;
-    let sumSquares = 0;
-    let count = 0;
+    let rms = 0;
 
-    for (let i = start; i < end; i += skip, count++) {
-      const val = data[i];
-      if (val < min) min = val;
-      else if (val > max) max = val;
+    if (end > start) {
+      let sumSquares = 0;
+      let count = 0;
 
-      sumSquares += val * val;
+      for (let i = start; i < end; i += skip, count++) {
+        const val = data[i];
+        if (val < min) min = val;
+        else if (val > max) max = val;
+
+        sumSquares += val * val;
+      }
+
+      rms = count > 0 ? Math.sqrt(sumSquares / count) : 0;
+    } else if (start < length) {
+      // Fewer than one sample per pixel. Rounding both edges onto the same
+      // sample leaves the range empty, and reporting that as silence broke the
+      // outline into a comb of alternating peaks and centre line. The pixel
+      // sits between two samples, so read the signal there instead.
+      const position = Math.max(0, (startPixel + pixel) * spp);
+      const index = Math.min(Math.floor(position), length - 1);
+      const next = Math.min(index + 1, length - 1);
+      const t = Math.min(1, Math.max(0, position - index));
+
+      const value = data[index] + (data[next] - data[index]) * t;
+
+      min = Math.min(0, value);
+      max = Math.max(0, value);
+      rms = Math.abs(value);
     }
 
-    const rms = count > 0 ? Math.sqrt(sumSquares / count) : 0;
     const offset = pixel * DRAW_STRIDE;
 
     drawData[offset] = min;

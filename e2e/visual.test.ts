@@ -56,7 +56,17 @@ test("pan", async ({ page }) => {
 
 test("zoom mouse", async ({ page }) => {
   await loadPage(page);
+
+  const before = (await getScales(page)).xScale.domain();
   await zoom(page, { time: 0, track: "1" }, -1000);
+  const after = (await getScales(page)).xScale.domain();
+
+  // Guards the helper itself: it used to feed canvas coordinates to
+  // page.mouse, so the wheel missed the canvas and this was a duplicate of
+  // "basic" that still compared green against a stale snapshot.
+  expect(after).not.toEqual(before);
+  expect(after[1] - after[0]).toBeLessThan(before[1] - before[0]);
+
   await expectScreenshot(page);
 });
 

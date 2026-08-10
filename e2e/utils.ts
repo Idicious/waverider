@@ -47,17 +47,34 @@ export async function waitForRender(page: Page) {
   });
 }
 
+/**
+ * The key that gates zoom, pan and cut, asked of the running instance rather
+ * than assumed: it resolves per platform, so hardcoding either one here makes
+ * the suite pass on one OS and fail on the other.
+ */
+export async function getModifier(page: Page): Promise<"Meta" | "Control"> {
+  const key = await page.evaluate(
+    () => (globalThis as any)["WaveShaper"].modifierKey
+  );
+
+  return key === "meta" ? "Meta" : "Control";
+}
+
 export async function zoom(page: Page, location: Location, level: number) {
   const { xScale, yScale } = await getScales(page);
   const coords = getCoordinates(location, xScale, yScale);
+  const modifier = await getModifier(page);
 
-  await page.mouse.move(coords.x, coords.y);
+  // The scales describe the canvas, but page.mouse works in viewport
+  // coordinates. Without the box origin the wheel lands above the canvas, the
+  // zoom behaviour never sees it, and the test passes while asserting nothing.
+  const box = (await (await page.$("canvas"))!.boundingBox())!;
 
-  // the zoom behaviour filters on metaKey, so press Meta rather than
-  // ControlOrMeta - the latter maps to Control off macOS and does nothing
-  await page.keyboard.down("Meta");
+  await page.mouse.move(box.x + coords.x, box.y + coords.y);
+
+  await page.keyboard.down(modifier);
   await page.mouse.wheel(0, level);
-  await page.keyboard.up("Meta");
+  await page.keyboard.up(modifier);
 }
 
 export async function expectScreenshot(page: Page) {
@@ -142,11 +159,13 @@ export async function drag(page: Page, start: Location, end: Location) {
 }
 
 export async function pan(page: Page, start: Location, end: Location) {
-  await page.keyboard.down("Meta");
+  const modifier = await getModifier(page);
+
+  await page.keyboard.down(modifier);
 
   await drag(page, start, end);
 
-  await page.keyboard.up("Meta");
+  await page.keyboard.up(modifier);
 }
 
 export async function moveInterval(
@@ -172,11 +191,11 @@ export async function cutLocation(page: Page, location: Location) {
     throw new Error("track not found");
   }
 
-  // the renderer checks metaKey, so press Meta rather than ControlOrMeta -
-  // the latter maps to Control off macOS and never triggers a cut
-  await page.keyboard.down("Meta");
+  const modifier = await getModifier(page);
+
+  await page.keyboard.down(modifier);
   await canvas!.click({ button: "left", position: { x, y } });
-  await page.keyboard.up("Meta");
+  await page.keyboard.up(modifier);
 }
 
 export async function cutInterval(
@@ -197,8 +216,9 @@ export async function cutInterval(
   location.time += time;
 
   const position = getCoordinates(location, xScale, yScale);
+  const modifier = await getModifier(page);
 
-  await page.keyboard.down("Meta");
+  await page.keyboard.down(modifier);
   await canvas!.click({ button: "left", position });
-  await page.keyboard.up("Meta");
+  await page.keyboard.up(modifier);
 }
