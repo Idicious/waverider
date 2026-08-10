@@ -174,8 +174,56 @@ test("programmatic zoom does not leave a stale transform behind", async ({
   );
 });
 
+/**
+ * Widest on-screen interval in CSS pixels, alongside the reported diagnostics.
+ * The waveform summary holds one bucket per device pixel, so the two should
+ * differ by exactly the device pixel ratio.
+ */
+function measureWaveform(page: import("@playwright/test").Page) {
+  return page.evaluate(() => {
+    const waveShaper = (globalThis as any)["WaveShaper"];
+    const { x } = waveShaper.getScaleData();
+    const [domainStart, domainEnd] = x.domain;
+    const [rangeStart, rangeEnd] = x.range;
+    const pxPerMs = (rangeEnd - rangeStart) / (domainEnd - domainStart);
+
+    let widestCssWidth = 0;
+    for (const interval of waveShaper.getState().intervals) {
+      const start = Math.max(interval.start + interval.offsetStart, domainStart);
+      const end = Math.min(interval.end, domainEnd);
+      widestCssWidth = Math.max(widestCssWidth, (end - start) * pxPerMs);
+    }
+
+    return { ...waveShaper.getDiagnostics(), widestCssWidth };
+  });
+}
+
+test("summarises one bucket per pixel at standard density", async ({
+  page,
+}) => {
+  await loadPage(page);
+  const m = await measureWaveform(page);
+
+  expect(m.pixelRatio).toBe(1);
+  expect(m.waveformBuckets).toBeGreaterThan(m.widestCssWidth * 0.95);
+  expect(m.waveformBuckets).toBeLessThan(m.widestCssWidth * 1.05);
+});
+
 test.describe("on a high density display", () => {
   test.use({ deviceScaleFactor: 2 });
+
+  test("summarises the waveform at device resolution", async ({ page }) => {
+    await loadPage(page);
+    const m = await measureWaveform(page);
+
+    expect(m.pixelRatio).toBe(2);
+
+    // Twice the buckets for the same CSS width. Summarising per CSS pixel
+    // renders a 1x waveform crisply, which looks sharp but carries half the
+    // detail the display can show.
+    expect(m.waveformBuckets).toBeGreaterThan(m.widestCssWidth * 1.95);
+    expect(m.waveformBuckets).toBeLessThan(m.widestCssWidth * 2.05);
+  });
 
   test("draws at device resolution and still hit tests correctly", async ({
     page,

@@ -394,6 +394,50 @@ test.describe("summarizeAudio", () => {
 
     expect(lengths).toEqual([0, 0, 0, 0]);
   });
+
+  test("keeps the outline solid below one sample per pixel", async ({
+    page,
+  }) => {
+    // Rounding both edges of a pixel onto the same sample used to leave the
+    // range empty, which read as silence and broke the waveform into a comb of
+    // alternating peaks and centre line - every other pixel at spp 0.5.
+    const rows = await page.evaluate(
+      async ({ url, sampleRate }) => {
+        const { AudioSummaryCache, DRAW_STRIDE } = await import(url);
+
+        // never crosses zero, so any empty bucket is the summariser's doing
+        // rather than a genuine zero crossing
+        const data = new Float32Array(sampleRate);
+        for (let i = 0; i < data.length; i++) {
+          data[i] = 0.5 + Math.sin(i / 8) * 0.4;
+        }
+
+        return [2, 1, 0.9, 0.5, 0.25, 0.1].map((spp) => {
+          const cache = new AudioSummaryCache();
+          const out = cache.summarize(data, "s" + spp, 0, 20, spp, sampleRate);
+          const buckets = out.length / DRAW_STRIDE;
+
+          let flat = 0;
+          for (let i = 0; i < buckets; i++) {
+            if (out[i * DRAW_STRIDE] === 0 && out[i * DRAW_STRIDE + 1] === 0) {
+              flat++;
+            }
+          }
+
+          return { spp, buckets, flat };
+        });
+      },
+      { url: AUDIO_MODULE_URL, sampleRate: SAMPLE_RATE }
+    );
+
+    for (const row of rows) {
+      expect(row.buckets).toBeGreaterThan(0);
+      expect({ spp: row.spp, flat: row.flat }).toEqual({
+        spp: row.spp,
+        flat: 0,
+      });
+    }
+  });
 });
 
 test.describe("waveform rendering", () => {

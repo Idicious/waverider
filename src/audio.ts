@@ -208,18 +208,38 @@ function summarizeRange(
     // the centre out to its level instead of a detached sliver.
     let min = 0;
     let max = 0;
-    let sumSquares = 0;
-    let count = 0;
+    let rms = 0;
 
-    for (let i = start; i < end; i += skip, count++) {
-      const val = data[i];
-      if (val < min) min = val;
-      else if (val > max) max = val;
+    if (end > start) {
+      let sumSquares = 0;
+      let count = 0;
 
-      sumSquares += val * val;
+      for (let i = start; i < end; i += skip, count++) {
+        const val = data[i];
+        if (val < min) min = val;
+        else if (val > max) max = val;
+
+        sumSquares += val * val;
+      }
+
+      rms = count > 0 ? Math.sqrt(sumSquares / count) : 0;
+    } else if (start < length) {
+      // Fewer than one sample per pixel. Rounding both edges onto the same
+      // sample leaves the range empty, and reporting that as silence broke the
+      // outline into a comb of alternating peaks and centre line. The pixel
+      // sits between two samples, so read the signal there instead.
+      const position = Math.max(0, (startPixel + pixel) * spp);
+      const index = Math.min(Math.floor(position), length - 1);
+      const next = Math.min(index + 1, length - 1);
+      const t = Math.min(1, Math.max(0, position - index));
+
+      const value = data[index] + (data[next] - data[index]) * t;
+
+      min = Math.min(0, value);
+      max = Math.max(0, value);
+      rms = Math.abs(value);
     }
 
-    const rms = count > 0 ? Math.sqrt(sumSquares / count) : 0;
     const offset = pixel * DRAW_STRIDE;
 
     drawData[offset] = min;

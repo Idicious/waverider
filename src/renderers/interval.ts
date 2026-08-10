@@ -84,6 +84,8 @@ export class IntervalRenderer implements Renderer {
     private readonly releaseFn: (color: string) => void,
     private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
     private readonly hasModifier: (e: ModifierEvent) => boolean,
+    /** Device pixels per CSS pixel, read fresh so a resize is picked up. */
+    private readonly getPixelRatio: () => number,
     private readonly sampleRate: number
   ) {}
 
@@ -203,7 +205,14 @@ export class IntervalRenderer implements Renderer {
     const valueZero = xScale.invert(0);
     const valueEnd = xScale.invert(state.configuration.width);
     const msPerPixel = valueOne - valueZero;
-    const samplesPerPixel = (msPerPixel * this.sampleRate) / 1000;
+
+    // One summary bucket per *device* pixel. The scales are in CSS pixels, so
+    // on a high density display that is devicePixelRatio buckets per CSS
+    // pixel; summarizing per CSS pixel would draw a 1x waveform crisply
+    // instead of drawing the detail the display can actually show.
+    const samplesPerPixel =
+      (msPerPixel * this.sampleRate) / 1000 / this.getPixelRatio();
+
     const start = actualStart(interval);
 
     const msIntoInterval = Math.max(valueZero, start) - start;
@@ -234,6 +243,17 @@ export class IntervalRenderer implements Renderer {
   clearAudioCache(intervalId: string) {
     this.#drawDataCache.delete(intervalId);
     this.#audioCache.clear(intervalId);
+  }
+
+  onDiagnostics() {
+    let widest = 0;
+    for (const data of this.#drawDataCache.values()) {
+      widest = Math.max(widest, data.length / DRAW_STRIDE);
+    }
+
+    // One bucket per device pixel, so this should track the widest interval's
+    // on screen width times the device pixel ratio.
+    return { waveformBuckets: widest };
   }
 
   /** Called when the owning WaveShaper is destroyed. */
@@ -373,10 +393,11 @@ export class IntervalRenderer implements Renderer {
               height,
               Math.max(0, x),
               y,
-              Math.min(Math.floor(width), data.length / DRAW_STRIDE),
+              width,
               context,
               waveColor,
-              state.configuration.showRmsBand
+              state.configuration.showRmsBand,
+              that.getPixelRatio()
             );
           }
         }
@@ -455,6 +476,12 @@ export class IntervalRenderer implements Renderer {
  */
 const WAVE_PEAK_ALPHA = 0.45;
 
+/**
+ * @param width  drawing width in CSS pixels
+ * @param pixelRatio device pixels per CSS pixel; the summary holds one bucket
+ *   per device pixel, so this is both the horizontal step and the grid the
+ *   outline is snapped to vertically
+ */
 export function renderWave(
   data: DrawData,
   height: number,
@@ -463,28 +490,40 @@ export function renderWave(
   width: number,
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   color: string,
-  showRmsBand: boolean
+  showRmsBand: boolean,
+  pixelRatio: number
 ) {
   const scale = height / 2;
-  const end = x + width;
-
   const center = y + scale;
+
+  const step = 1 / pixelRatio;
+  const count = Math.min(
+    Math.floor(width * pixelRatio),
+    Math.floor(data.length / DRAW_STRIDE)
+  );
+
+  const end = x + count * step;
+
+  // Snapping keeps the outline off half-covered rows, which would otherwise
+  // wash it out. It is a device pixel grid rather than a CSS one: rounding to
+  // whole CSS pixels here would throw away the extra vertical precision the
+  // display has, which is the whole point of summarizing this finely.
+  const snap = (value: number) =>
+    Math.ceil((value * scale + center) * pixelRatio) / pixelRatio;
 
   /** Fills between the centre line and a min/max pair of the packed summary. */
   const envelope = (minOffset: number, maxOffset: number) => {
     const region = new Path2D();
 
     region.moveTo(x, center);
-    for (let i = 0; i < width; i++) {
-      const value = data[i * DRAW_STRIDE + minOffset];
-      region.lineTo(i + x, Math.ceil(value * scale + center));
+    for (let i = 0; i < count; i++) {
+      region.lineTo(x + i * step, snap(data[i * DRAW_STRIDE + minOffset]));
     }
     region.lineTo(end, center);
 
     region.moveTo(x, center);
-    for (let i = 0; i < width; i++) {
-      const value = data[i * DRAW_STRIDE + maxOffset];
-      region.lineTo(i + x, Math.ceil(value * scale + center));
+    for (let i = 0; i < count; i++) {
+      region.lineTo(x + i * step, snap(data[i * DRAW_STRIDE + maxOffset]));
     }
     region.lineTo(end, center);
     region.closePath();

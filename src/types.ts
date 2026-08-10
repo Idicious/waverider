@@ -160,6 +160,9 @@ export type Renderer = {
   /** Release anything held for the lifetime of the owning WaveShaper. */
   onDestroy?: () => void;
 
+  /** Numbers worth surfacing through WaveShaper.getDiagnostics(). */
+  onDiagnostics?: () => Record<string, number>;
+
   onDrag?: (
     e: d3.D3DragEvent<any, any, any>,
     d: BoundData | null,

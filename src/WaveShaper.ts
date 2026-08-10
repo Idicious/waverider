@@ -184,12 +184,14 @@ export class WaveShaper {
   #onStateUpdate: Array<StateUpdateFn> = [];
   #onZoom: Array<ZoomFn> = [];
   #onDestroy: Array<() => void> = [];
+  #onDiagnostics: Array<() => Record<string, number>> = [];
   #dragData: BoundData | null = null;
 
   /** Backing store size, in device pixels. */
   #width!: number;
   #height!: number;
-  #dpr!: number;
+  /** Real value is set by #resizeCanvases before anything binds or renders. */
+  #dpr = 1;
 
   #raf: number | null = null;
   #destroyed = false;
@@ -255,6 +257,7 @@ export class WaveShaper {
         this.releaseBindData.bind(this),
         this.updateState.bind(this),
         this.#hasModifier,
+        () => this.#dpr,
         this.autoContext.sampleRate
       )
     );
@@ -301,7 +304,17 @@ export class WaveShaper {
    * have ever existed.
    */
   getDiagnostics() {
-    return { boundElements: this.#bindMap.size, running: this.#raf !== null };
+    const fromRenderers = Object.assign(
+      {},
+      ...this.#onDiagnostics.map((fn) => fn())
+    ) as Record<string, number>;
+
+    return {
+      boundElements: this.#bindMap.size,
+      running: this.#raf !== null,
+      pixelRatio: this.#dpr,
+      ...fromRenderers,
+    };
   }
 
   getScaleData() {
@@ -372,6 +385,8 @@ export class WaveShaper {
     register.onStateUpdate &&
       this.#onStateUpdate.push(register.onStateUpdate.bind(register));
     register.onDestroy && this.#onDestroy.push(register.onDestroy.bind(register));
+    register.onDiagnostics &&
+      this.#onDiagnostics.push(register.onDiagnostics.bind(register));
     register.onSelectStart &&
       this.#onSelectStart.push(register.onSelectStart.bind(register));
     register.onSelect && this.#onSelect.push(register.onSelect.bind(register));
@@ -581,6 +596,7 @@ export class WaveShaper {
     this.#onSelect.length = 0;
     this.#onSelectEnd.length = 0;
     this.#onDestroy.length = 0;
+    this.#onDiagnostics.length = 0;
   }
 
   /**
