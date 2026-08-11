@@ -138,6 +138,16 @@ export class WaveShaper {
   #zoom = d3
     .zoom<HTMLCanvasElement, unknown>()
     .filter((e) => this.#hasModifier(e))
+    // d3's default wheelDelta multiplies by ten whenever ctrlKey is held,
+    // because browsers report trackpad pinch as a ctrl+wheel gesture with tiny
+    // deltas. Ctrl is our ordinary zoom modifier everywhere except macOS, so
+    // that boost would make one wheel notch zoom ten times further on Linux and
+    // Windows than the same notch does on a Mac. This is d3's formula with the
+    // ctrlKey term dropped, so a notch means the same thing on every platform.
+    .wheelDelta(
+      (e: WheelEvent) =>
+        -e.deltaY * (e.deltaMode === 1 ? 0.05 : e.deltaMode ? 1 : 0.002)
+    )
     // A non-positive scale factor would mirror or collapse the view; there is
     // no upper bound worth imposing, the audio just runs out.
     .scaleExtent([Number.MIN_VALUE, Infinity])
