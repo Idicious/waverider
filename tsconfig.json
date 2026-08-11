@@ -10,6 +10,8 @@
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    // Resolves the bare "src/..." specifiers the e2e tests import.
+    "baseUrl": ".",
     "outDir": "./dist",
     "rootDir": "./src"
   },

@@ -12,6 +12,8 @@
     "build": "tsc",
     "preview": "vite preview demo",
     "test:e2e": "playwright test",
+    "test:e2e:linux": "docker run --rm --ipc=host -v \"$PWD\":/work -v /work/node_modules -w /work mcr.microsoft.com/playwright:v1.45.2-jammy sh -c 'npm ci --no-audit --no-fund && npx playwright test \"$@\"' --",
+    "test:e2e:linux:update": "npm run test:e2e:linux -- --update-snapshots",
     "typecheck": "tsc --noEmit"
   },
   "type": "module",

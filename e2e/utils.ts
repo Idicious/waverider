@@ -78,7 +78,10 @@ export async function zoom(page: Page, location: Location, level: number) {
 }
 
 export async function expectScreenshot(page: Page) {
-  const screenshot = await page.screenshot();
+  // Scoped to the canvas rather than the page: a full-page shot also captures
+  // the demo's labels and native checkboxes, which rasterize with the
+  // platform's fonts and form-control theme and drown the render in the diff.
+  const screenshot = await page.locator("canvas").screenshot();
   expect(screenshot).toMatchSnapshot();
 }
 
