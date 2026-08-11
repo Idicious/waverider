@@ -527,39 +527,66 @@ export function renderWave(
   const left = Math.round(x * pixelRatio) / pixelRatio;
 
   /**
-   * One solid bar per bucket, between a min/max pair of the packed summary.
+   * The region between a min/max pair of the packed summary, drawn as a
+   * staircase: flat across each bucket, stepping vertically between them.
    *
-   * The outline used to be filled as a single polygon through the bucket
-   * values, but that interpolates between neighbours: a transient standing
-   * alone in its bucket became a one-pixel-wide sliver whose antialiased tip
-   * faded in proportion to how far it rose above the buckets next to it.
-   * Since zooming changes what those neighbours are, the same peak read as a
-   * different height at every zoom level. Bars cover every row up to their
-   * own bucket's true extremes, so a peak's height on screen depends on its
-   * bucket alone.
+   * The outline used to be filled as a polygon through the bucket values,
+   * but that interpolates between neighbours: a transient standing alone in
+   * its bucket became a one-pixel-wide sliver whose antialiased tip faded in
+   * proportion to how far it rose above the buckets next to it. Since
+   * zooming changes what those neighbours are, the same peak read as a
+   * different height at every zoom level. A staircase covers each bucket's
+   * full width up to its own extremes, so a peak's height on screen depends
+   * on its bucket alone. One bar per bucket draws the same region, but as
+   * tens of thousands of subpaths it filled several times slower than this
+   * single outline, whose runs of equal rows coalesce into one step.
    *
    * Edges are rounded outward to whole device rows - not CSS rows, which
    * would throw away the vertical precision the display has - so the row at
-   * a spike's tip is fully covered instead of dimmed by coverage.
+   * a spike's tip is fully covered instead of dimmed by coverage. A silent
+   * bucket puts both boundaries on the same row, a zero-area passage that
+   * draws nothing, as the polygon's did.
    */
   const envelope = (minOffset: number, maxOffset: number) => {
     const region = new Path2D();
 
-    for (let i = 0; i < count; i++) {
-      const min = data[i * DRAW_STRIDE + minOffset];
-      const max = data[i * DRAW_STRIDE + maxOffset];
+    const silent = Math.round(center * pixelRatio) / pixelRatio;
 
-      // A silent bucket draws nothing, matching the empty fill it used to
-      // produce as a polygon of zero area.
-      if (min === 0 && max === 0) continue;
+    const boundary = (index: number, offset: number, roundOut: typeof Math.ceil) => {
+      const min = data[index * DRAW_STRIDE + minOffset];
+      const max = data[index * DRAW_STRIDE + maxOffset];
+      if (min === 0 && max === 0) return silent;
 
-      const top =
-        Math.floor((min * scale + center) * pixelRatio) / pixelRatio;
-      const bottom =
-        Math.ceil((max * scale + center) * pixelRatio) / pixelRatio;
+      const value = data[index * DRAW_STRIDE + offset];
+      return roundOut((value * scale + center) * pixelRatio) / pixelRatio;
+    };
 
-      region.rect(left + i * step, top, step, bottom - top);
+    // along the min side, left to right
+    let previous = boundary(0, minOffset, Math.floor);
+    region.moveTo(left, previous);
+    for (let i = 1; i < count; i++) {
+      const top = boundary(i, minOffset, Math.floor);
+      if (top !== previous) {
+        region.lineTo(left + i * step, previous);
+        region.lineTo(left + i * step, top);
+        previous = top;
+      }
     }
+    region.lineTo(left + count * step, previous);
+
+    // and back along the max side
+    previous = boundary(count - 1, maxOffset, Math.ceil);
+    region.lineTo(left + count * step, previous);
+    for (let i = count - 2; i >= 0; i--) {
+      const bottom = boundary(i, maxOffset, Math.ceil);
+      if (bottom !== previous) {
+        region.lineTo(left + (i + 1) * step, previous);
+        region.lineTo(left + (i + 1) * step, bottom);
+        previous = bottom;
+      }
+    }
+    region.lineTo(left, previous);
+    region.closePath();
 
     return region;
   };
