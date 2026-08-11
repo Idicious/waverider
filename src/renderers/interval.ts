@@ -106,7 +106,10 @@ export class IntervalRenderer implements Renderer {
   }
 
   onZoom(e: d3.D3ZoomEvent<any, any>) {
-    this.#zooming = e.type === "zoom";
+    // Programmatic transforms carry no sourceEvent and never see a matching
+    // end pass, so treating one as a gesture would leave summaries degraded
+    // until the next real gesture settled.
+    this.#zooming = e.type === "zoom" && e.sourceEvent != null;
   }
 
   onDrag(

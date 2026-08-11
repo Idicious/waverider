@@ -164,7 +164,13 @@ export class WaveShaper {
     // Fires when the gesture settles - mouseup, touchend, or the wheel going
     // idle. Renderers that degrade quality while the view is in motion use
     // this pass to refine, so it rebinds even though the scale is unchanged.
+    //
+    // Programmatic transforms fire end too, with no sourceEvent - those come
+    // from #setView, which computes at full quality and emits its own bind,
+    // so refining behind it would only repeat a full pass per call.
     .on("end", (e: d3.D3ZoomEvent<any, any>) => {
+      if (e.sourceEvent == null) return;
+
       this.#onZoom.forEach((fn) => fn(e));
       this.#ee.emit("bind");
     });
