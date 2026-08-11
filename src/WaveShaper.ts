@@ -18,6 +18,7 @@ import type {
   Renderer,
   WaveShaperState,
   ZoomFn,
+  DirtyRect,
   SelectFn,
 } from "./types";
 import { CursorRenderer } from "./renderers/cursor";
@@ -35,12 +36,24 @@ export class WaveShaper {
 
   /**
    * Nothing in the scene animates on its own, so the render loop only paints
-   * when something has actually changed. Every mutation ends in a "bind"
-   * emit, which is where these get raised; the selection rectangle is the one
-   * exception and marks itself.
+   * when something has actually changed - and only where. The dirty region
+   * accumulates in CSS pixels until the next paint consumes it; null means
+   * clean. Every mutation ends in a "bind" emit, which is where it gets
+   * raised: to the whole render area by default, or to just the regions the
+   * responsible renderer reported for a type-filtered bind. The selection
+   * rectangle is the one exception and marks itself.
    */
-  #dirty = true;
+  #dirtyRegion: DirtyRect | null = null;
   #hiddenDirty = true;
+
+  /**
+   * Regions reported by renderers during the bind currently being emitted;
+   * null outside one. See #emitBind.
+   */
+  #bindReports: DirtyRect[] | null = null;
+
+  /** Last zoom transform seen, for recognising pure-translation gestures. */
+  #lastTransform: { k: number; x: number } | null = null;
 
   /** Whichever modifier the configuration resolves to right now. */
   get modifierKey() {
@@ -57,7 +70,7 @@ export class WaveShaper {
 
       this.#onDrag.forEach((fn) => {
         const bindData = fn(e, this.#dragData, this.#xScale, this.#yScale);
-        bindData && this.#ee.emit("bind", bindData);
+        bindData && this.#emitBind(bindData);
       });
     })
     .on("start.drag", (e: d3.D3DragEvent<any, any, any>) => {
@@ -66,7 +79,7 @@ export class WaveShaper {
 
       this.#onDragStart.forEach((fn) => {
         const bindData = fn(e, this.#dragData, this.#xScale, this.#yScale);
-        bindData && this.#ee.emit("bind", bindData);
+        bindData && this.#emitBind(bindData);
       });
     })
     .on("end.drag", (e: d3.D3DragEvent<any, any, any>) => {
@@ -74,7 +87,7 @@ export class WaveShaper {
 
       this.#onDragEnd.forEach((fn) => {
         const bindData = fn(e, this.#dragData, this.#xScale, this.#yScale);
-        bindData && this.#ee.emit("bind", bindData);
+        bindData && this.#emitBind(bindData);
       });
 
       this.#dragData = null;
@@ -93,7 +106,7 @@ export class WaveShaper {
           this.#xScale,
           this.#yScale
         );
-        bindData && this.#ee.emit("bind", bindData);
+        bindData && this.#emitBind(bindData);
       });
     })
     .on("start.select", (e: d3.D3DragEvent<any, any, any>) => {
@@ -112,7 +125,7 @@ export class WaveShaper {
           this.#yScale
         );
 
-        bindData && this.#ee.emit("bind", bindData);
+        bindData && this.#emitBind(bindData);
       });
     })
     .on("end.select", (e: d3.D3DragEvent<any, any, any>) => {
@@ -126,7 +139,7 @@ export class WaveShaper {
           this.#xScale,
           this.#yScale
         );
-        bindData && this.#ee.emit("bind", bindData);
+        bindData && this.#emitBind(bindData);
       });
 
       this.#selectionStart = null;
@@ -155,11 +168,32 @@ export class WaveShaper {
       [0, 0],
       [Infinity, Infinity],
     ])
+    // Seed the transform tracker as the gesture begins, so its very first
+    // tick can already tell a pure translation from a zoom.
+    .on("start", (e: d3.D3ZoomEvent<any, any>) => {
+      this.#lastTransform = { k: e.transform.k, x: e.transform.x };
+    })
     .on("zoom", (e: d3.D3ZoomEvent<any, any>) => {
+      const previous = this.#lastTransform;
+      this.#lastTransform = { k: e.transform.k, x: e.transform.x };
+
       this.#xScale = e.transform.rescaleX(this.#xScaleOriginal);
 
       this.#onZoom.forEach((fn) => fn(e));
-      this.#ee.emit("bind");
+
+      // A gesture that only translates moves every pixel already on screen:
+      // shift them and repaint just the strip the shift exposed. Zooming
+      // changes what every pixel means, so it keeps the full repaint.
+      const translation =
+        e.sourceEvent != null &&
+        previous !== null &&
+        e.transform.k === previous.k;
+
+      if (translation && this.#panShift(e.transform.x - previous.x)) {
+        this.#emitBind(undefined, true);
+      } else {
+        this.#emitBind();
+      }
     })
     // Fires when the gesture settles - mouseup, touchend, or the wheel going
     // idle. Renderers that degrade quality while the view is in motion use
@@ -172,7 +206,7 @@ export class WaveShaper {
       if (e.sourceEvent == null) return;
 
       this.#onZoom.forEach((fn) => fn(e));
-      this.#ee.emit("bind");
+      this.#emitBind();
     });
 
   #selecting = false;
@@ -190,10 +224,13 @@ export class WaveShaper {
 
   #hiddenCanvas!: OffscreenCanvas;
   #hiddenCanvasDraw!: OffscreenCanvas;
+  /** Spare buffer the pan fast path shifts into, then swaps with the draw buffer. */
+  #scratchCanvas!: OffscreenCanvas;
 
   // canvas contexts
   #ctxHidden!: OffscreenCanvasRenderingContext2D;
   #ctxHiddenDraw!: OffscreenCanvasRenderingContext2D;
+  #ctxScratch!: OffscreenCanvasRenderingContext2D;
   #ctx!: CanvasRenderingContext2D;
 
   #typeRoots = new Map<symbol, d3.Selection<HTMLElement, any, any, any>>();
@@ -230,8 +267,9 @@ export class WaveShaper {
       signal: this.#abort.signal,
     });
 
-    // every path that changes what is on screen ends up emitting this
-    this.#ee.on("bind", () => this.invalidate());
+    // Every path that changes what is on screen ends up going through
+    // #emitBind, which raises the dirty region - there is deliberately no
+    // listener here, so a bind can dirty less than the whole area.
 
     const config = state.configuration;
     this.#yScale = d3
@@ -262,7 +300,7 @@ export class WaveShaper {
 
         this.#onClick.forEach((fn) => {
           const bindData = fn(e, target, this.#xScale, this.#yScale);
-          bindData && this.#ee.emit("bind", bindData);
+          bindData && this.#emitBind(bindData);
         });
       })
       .on("mousemove", (e) => {
@@ -270,7 +308,7 @@ export class WaveShaper {
 
         this.#onMouseOver.forEach((fn) => {
           const bindData = fn(e, target, this.#xScale, this.#yScale);
-          bindData && this.#ee.emit("bind", bindData);
+          bindData && this.#emitBind(bindData);
         });
       });
 
@@ -281,7 +319,8 @@ export class WaveShaper {
         this.updateState.bind(this),
         this.#hasModifier,
         () => this.#dpr,
-        this.autoContext.sampleRate
+        this.autoContext.sampleRate,
+        this.#reportDirty
       )
     );
 
@@ -336,6 +375,7 @@ export class WaveShaper {
       boundElements: this.#bindMap.size,
       running: this.#raf !== null,
       pixelRatio: this.#dpr,
+      lastPaintFraction: this.#lastPaintFraction,
       ...fromRenderers,
     };
   }
@@ -376,7 +416,7 @@ export class WaveShaper {
     this.state = state;
     initialize && this.#resizeCanvases();
 
-    this.#ee.emit("bind", bindData);
+    this.#emitBind(bindData);
 
     cb?.();
 
@@ -434,7 +474,7 @@ export class WaveShaper {
         register.onBind!(root, this.state, this.#xScale, this.#yScale);
       });
 
-      this.#ee.on("render", (toHidden = false) => {
+      this.#ee.on("render", (toHidden = false, clip?: DirtyRect) => {
         const rootSelection = this.#typeRoots.get(register.TYPE);
 
         if (rootSelection == null) {
@@ -454,7 +494,8 @@ export class WaveShaper {
             toHidden,
             this.#xScale,
             this.#yScale,
-            this.state
+            this.state,
+            clip
           );
         } finally {
           context.restore();
@@ -506,28 +547,193 @@ export class WaveShaper {
   }
 
   process() {
-    this.#ee.emit("bind");
+    this.#emitBind();
     this.redrawHidden();
     this.redraw();
   }
 
-  /** Ask for a repaint on the next frame. */
+  /** Ask for a full repaint on the next frame. */
   invalidate() {
-    this.#dirty = true;
+    const { width, height } = this.state.configuration;
+    this.#dirtyRegion = { x0: 0, y0: 0, x1: width, y1: height };
     this.#hiddenDirty = true;
   }
 
-  redraw() {
-    this.#dirty = false;
+  /**
+   * Ask for a repaint of one region on the next frame. Regions accumulate
+   * into their bounding box until the paint consumes them.
+   */
+  invalidateRect(rect: DirtyRect) {
+    const region = this.#dirtyRegion;
 
-    // The offscreen contexts are scaled, so they clear in CSS pixels; the
-    // visible one is not, and clears its backing store directly.
+    this.#dirtyRegion =
+      region === null
+        ? { ...rect }
+        : {
+            x0: Math.min(region.x0, rect.x0),
+            y0: Math.min(region.y0, rect.y0),
+            x1: Math.max(region.x1, rect.x1),
+            y1: Math.max(region.y1, rect.y1),
+          };
+
+    this.#hiddenDirty = true;
+  }
+
+  /**
+   * Runs a bind and decides what it dirtied. A type-filtered bind whose
+   * renderer reported every region it changed repaints only those regions;
+   * anything else - an unfiltered bind, or a renderer that reports nothing -
+   * falls back to repainting the whole render area, so a renderer that has
+   * never heard of reporting cannot end up under-painted.
+   *
+   * `silent` skips the invalidation decision entirely, for callers that
+   * already marked what changed - the pan fast path, which dirties only the
+   * strip its blit exposed.
+   */
+  #emitBind(data?: BindData, silent = false) {
+    const reports: DirtyRect[] = [];
+
+    // updateState can run inside a bind handler and emit its own bind, so
+    // the collector nests instead of clobbering the outer one.
+    const previous = this.#bindReports;
+    this.#bindReports = reports;
+
+    try {
+      this.#ee.emit("bind", data);
+    } finally {
+      this.#bindReports = previous;
+    }
+
+    if (silent) return;
+
+    if (data?.type !== undefined && reports.length > 0) {
+      for (const rect of reports) this.invalidateRect(rect);
+    } else {
+      this.invalidate();
+    }
+  }
+
+  /** Handed to renderers so they can report regions during a bind. */
+  #reportDirty = (x0: number, y0: number, x1: number, y1: number) => {
+    this.#bindReports?.push({ x0, y0, x1, y1 });
+  };
+
+  /**
+   * Shift the draw buffer sideways by a pan delta and dirty only the strip
+   * the shift exposed. The shift is a whole number of device pixels - the
+   * same trick the audio summaries use, one level up - so the copy is exact;
+   * the sub-pixel remainder is at most half a device pixel of placement
+   * error, and the full repaint on the gesture's end heals it.
+   *
+   * Returns false when the delta is too small to move a whole device pixel
+   * (nothing to do - the caller must not repaint, or the sub-pixel move
+   * would be paid at full price) or so large nothing survives the shift, in
+   * which case a full repaint is the same work and simpler.
+   */
+  #panShift(deltaCss: number): boolean {
+    const { width, height } = this.state.configuration;
+    const deltaDevice = Math.round(deltaCss * this.#dpr);
+
+    if (deltaDevice === 0) return true;
+    if (Math.abs(deltaDevice) >= this.#width) return false;
+
+    // Copy shifted into the spare buffer, then swap the pair - one copy
+    // instead of copy-out-and-back, and no reliance on overlapping
+    // self-drawImage behaviour.
+    this.#ctxScratch.save();
+    this.#ctxScratch.setTransform(1, 0, 0, 1, 0, 0);
+    this.#ctxScratch.clearRect(0, 0, this.#width, this.#height);
+    this.#ctxScratch.drawImage(this.#hiddenCanvasDraw, deltaDevice, 0);
+    this.#ctxScratch.restore();
+
+    [this.#hiddenCanvasDraw, this.#scratchCanvas] = [
+      this.#scratchCanvas,
+      this.#hiddenCanvasDraw,
+    ];
+    [this.#ctxHiddenDraw, this.#ctxScratch] = [
+      this.#ctxScratch,
+      this.#ctxHiddenDraw,
+    ];
+
+    const deltaShifted = deltaDevice / this.#dpr;
+
+    // A region already waiting to be painted describes pixels that just
+    // moved with the shift - carry it along, or two pans inside one frame
+    // leave the first tick's exposed strip stranded at its old coordinates.
+    if (this.#dirtyRegion !== null) {
+      this.#dirtyRegion.x0 += deltaShifted;
+      this.#dirtyRegion.x1 += deltaShifted;
+    }
+
+    if (deltaShifted > 0) {
+      this.invalidateRect({ x0: 0, y0: 0, x1: deltaShifted, y1: height });
+    } else {
+      this.invalidateRect({
+        x0: width + deltaShifted,
+        y0: 0,
+        x1: width,
+        y1: height,
+      });
+    }
+
+    return true;
+  }
+
+  /**
+   * Fraction of the render area the last paint actually repainted, 0..1.
+   * Partial redraws are the whole point of region tracking, so this is the
+   * number to watch: a drag should score far below 1, a zoom exactly 1.
+   */
+  #lastPaintFraction = 1;
+
+  redraw() {
+    const region = this.#dirtyRegion ?? {
+      x0: 0,
+      y0: 0,
+      x1: this.state.configuration.width,
+      y1: this.state.configuration.height,
+    };
+    this.#dirtyRegion = null;
+
     const { width, height } = this.state.configuration;
 
-    this.#ctxHiddenDraw.clearRect(0, 0, width, height);
-    this.#ctx.clearRect(0, 0, this.#width, this.#height);
+    // Snap the region outward to whole device pixels so the clear, the clip
+    // and the final blit all cut on the same texel boundaries.
+    const x0 = Math.max(0, Math.floor(region.x0 * this.#dpr) / this.#dpr);
+    const y0 = Math.max(0, Math.floor(region.y0 * this.#dpr) / this.#dpr);
+    const x1 = Math.min(width, Math.ceil(region.x1 * this.#dpr) / this.#dpr);
+    const y1 = Math.min(height, Math.ceil(region.y1 * this.#dpr) / this.#dpr);
 
-    this.#ee.emit("render");
+    const partial = x0 > 0 || y0 > 0 || x1 < width || y1 < height;
+
+    this.#lastPaintFraction =
+      x1 > x0 && y1 > y0
+        ? ((x1 - x0) * (y1 - y0)) / (width * height)
+        : 0;
+
+    if (x1 > x0 && y1 > y0) {
+      // The offscreen context is scaled, so it clears in CSS pixels. Only
+      // the dirty region is cleared and repainted; everything outside keeps
+      // the pixels it already has.
+      this.#ctxHiddenDraw.save();
+      this.#ctxHiddenDraw.clearRect(x0, y0, x1 - x0, y1 - y0);
+
+      let clip: DirtyRect | undefined;
+      if (partial) {
+        const path = new Path2D();
+        path.rect(x0, y0, x1 - x0, y1 - y0);
+        this.#ctxHiddenDraw.clip(path);
+        clip = { x0, y0, x1, y1 };
+      }
+
+      this.#ee.emit("render", false, clip);
+      this.#ctxHiddenDraw.restore();
+    }
+
+    // The visible canvas always receives the full buffer: after a pan blit
+    // every pixel of it has moved, and a full-surface copy is one drawImage
+    // either way. The visible context is unscaled and works in device pixels.
+    this.#ctx.clearRect(0, 0, this.#width, this.#height);
     this.#ctx.drawImage(this.#hiddenCanvasDraw, 0, 0);
   }
 
@@ -549,7 +755,7 @@ export class WaveShaper {
     const tick = () => {
       // the tick still happens every frame, so a missed invalidate shows up as
       // one late frame rather than a permanently stale canvas
-      if (this.#dirty) this.redraw();
+      if (this.#dirtyRegion !== null) this.redraw();
       this.#raf = requestAnimationFrame(tick);
     };
 
@@ -636,7 +842,7 @@ export class WaveShaper {
 
     d3.select(this.canvas).call(this.#zoom.transform, d3.zoomIdentity);
 
-    this.#ee.emit("bind");
+    this.#emitBind();
   }
 
   /**
@@ -665,16 +871,21 @@ export class WaveShaper {
 
     this.#hiddenCanvas = new OffscreenCanvas(this.#width, this.#height);
     this.#hiddenCanvasDraw = new OffscreenCanvas(this.#width, this.#height);
+    this.#scratchCanvas = new OffscreenCanvas(this.#width, this.#height);
 
     // The visible context is only ever used to clear and to blit a buffer of
     // exactly this size, so it stays in device pixels and copies 1:1.
     this.#ctx = this.canvas.getContext("2d")!;
     this.#ctxHiddenDraw = this.#hiddenCanvasDraw.getContext("2d")!;
+    this.#ctxScratch = this.#scratchCanvas.getContext("2d")!;
     this.#ctxHidden = this.#hiddenCanvas.getContext("2d", {
       willReadFrequently: true,
     })!;
 
+    // The scratch buffer gets the same scale as the draw buffer, because the
+    // pan fast path swaps the two and renderers keep working in CSS pixels.
     this.#ctxHiddenDraw.scale(dpr, dpr);
+    this.#ctxScratch.scale(dpr, dpr);
     this.#ctxHidden.scale(dpr, dpr);
 
     this.invalidate();

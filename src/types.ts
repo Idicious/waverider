@@ -136,6 +136,27 @@ export interface BindData {
   type: symbol;
 }
 
+/** An axis-aligned region of the render area, in CSS pixels. */
+export interface DirtyRect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/**
+ * Reports a region whose pixels a renderer changed during a bind. When every
+ * change of a type-filtered bind is reported, only those regions repaint;
+ * a bind with no reports falls back to repainting everything, so renderers
+ * that never call this stay correct.
+ */
+export type ReportDirtyFn = (
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number
+) => void;
+
 export type Renderer = {
   TYPE: symbol;
 
@@ -152,7 +173,14 @@ export type Renderer = {
     toHidden: boolean,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>,
-    state: WaveShaperState
+    state: WaveShaperState,
+    /**
+     * Region being repainted, when it is less than the whole render area.
+     * The context is already clipped to it, so this is purely an
+     * optimization hint: elements entirely outside can be skipped without
+     * building their draw calls at all.
+     */
+    clip?: DirtyRect
   ) => void;
 
   onStateUpdate?: (state: WaveShaperState) => void;

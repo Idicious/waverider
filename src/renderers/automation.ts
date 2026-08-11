@@ -208,6 +208,11 @@ export class AutomationRenderer implements Renderer {
         }
         break;
       }
+      default:
+        // Not this renderer's drag: requesting a rebind anyway would force
+        // a re-layout of every lane on every tick of an interval drag - and
+        // because this renderer reports no regions, a full repaint too.
+        return;
     }
 
     return { type: this.TYPE };
