@@ -3,8 +3,8 @@ import type { Page } from "@playwright/test";
 import { scaleBand, scaleLinear } from "d3";
 import type { ScaleBand, ScaleLinear } from "d3";
 import { fileURLToPath } from "node:url";
-import type { Interval, ScaleData, WaveShaperState } from "src/types";
-import { invertYScale } from "src/utils";
+import type { Interval, ScaleData, WaveShaperState } from "../src/types";
+import { invertYScale } from "../src/utils";
 
 export const RESIZE_HANDLE_WIDTH = 5;
 
