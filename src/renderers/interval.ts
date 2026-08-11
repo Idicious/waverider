@@ -253,7 +253,7 @@ export class IntervalRenderer implements Renderer {
 
     // One bucket per device pixel, so this should track the widest interval's
     // on screen width times the device pixel ratio.
-    return { waveformBuckets: widest };
+    return { waveformBuckets: widest, ...this.#audioCache.diagnostics() };
   }
 
   /** Called when the owning WaveShaper is destroyed. */
