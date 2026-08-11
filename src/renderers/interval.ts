@@ -521,31 +521,45 @@ export function renderWave(
     Math.floor(data.length / DRAW_STRIDE)
   );
 
-  const end = x + count * step;
+  // Columns sit on the device pixel grid - the summary holds one bucket per
+  // device pixel, so a fractional origin would smear every bucket across two
+  // pixels and wash out anything one bucket wide.
+  const left = Math.round(x * pixelRatio) / pixelRatio;
 
-  // Snapping keeps the outline off half-covered rows, which would otherwise
-  // wash it out. It is a device pixel grid rather than a CSS one: rounding to
-  // whole CSS pixels here would throw away the extra vertical precision the
-  // display has, which is the whole point of summarizing this finely.
-  const snap = (value: number) =>
-    Math.ceil((value * scale + center) * pixelRatio) / pixelRatio;
-
-  /** Fills between the centre line and a min/max pair of the packed summary. */
+  /**
+   * One solid bar per bucket, between a min/max pair of the packed summary.
+   *
+   * The outline used to be filled as a single polygon through the bucket
+   * values, but that interpolates between neighbours: a transient standing
+   * alone in its bucket became a one-pixel-wide sliver whose antialiased tip
+   * faded in proportion to how far it rose above the buckets next to it.
+   * Since zooming changes what those neighbours are, the same peak read as a
+   * different height at every zoom level. Bars cover every row up to their
+   * own bucket's true extremes, so a peak's height on screen depends on its
+   * bucket alone.
+   *
+   * Edges are rounded outward to whole device rows - not CSS rows, which
+   * would throw away the vertical precision the display has - so the row at
+   * a spike's tip is fully covered instead of dimmed by coverage.
+   */
   const envelope = (minOffset: number, maxOffset: number) => {
     const region = new Path2D();
 
-    region.moveTo(x, center);
     for (let i = 0; i < count; i++) {
-      region.lineTo(x + i * step, snap(data[i * DRAW_STRIDE + minOffset]));
-    }
-    region.lineTo(end, center);
+      const min = data[i * DRAW_STRIDE + minOffset];
+      const max = data[i * DRAW_STRIDE + maxOffset];
 
-    region.moveTo(x, center);
-    for (let i = 0; i < count; i++) {
-      region.lineTo(x + i * step, snap(data[i * DRAW_STRIDE + maxOffset]));
+      // A silent bucket draws nothing, matching the empty fill it used to
+      // produce as a polygon of zero area.
+      if (min === 0 && max === 0) continue;
+
+      const top =
+        Math.floor((min * scale + center) * pixelRatio) / pixelRatio;
+      const bottom =
+        Math.ceil((max * scale + center) * pixelRatio) / pixelRatio;
+
+      region.rect(left + i * step, top, step, bottom - top);
     }
-    region.lineTo(end, center);
-    region.closePath();
 
     return region;
   };
