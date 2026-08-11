@@ -87,6 +87,14 @@ export class IntervalRenderer implements Renderer {
    */
   #zooming = false;
 
+  /**
+   * True while one of this renderer's own handles is being dragged. Both
+   * gesture flags also degrade the waveform fill to its stepped shape until
+   * the gesture settles - the frames in between are in motion, where the
+   * cheap fill is indistinguishable from the smooth one.
+   */
+  #dragging = false;
+
   constructor(
     private readonly bindFn: (data: Interval, type: symbol) => string,
     private readonly releaseFn: (color: string) => void,
@@ -148,6 +156,7 @@ export class IntervalRenderer implements Renderer {
       case TYPES.RESIZE_RIGHT:
       case TYPES.FADE_IN:
       case TYPES.FADE_OUT: {
+        this.#dragging = true;
         this.#filterFn = (i: Interval) => i.id === d.data.id;
         this.updateState((state) => {
           const index = d3.max(state.intervals, (i) => i.index) ?? 1;
@@ -171,8 +180,11 @@ export class IntervalRenderer implements Renderer {
       case TYPES.RESIZE_RIGHT:
       case TYPES.FADE_IN:
       case TYPES.FADE_OUT: {
+        this.#dragging = false;
         this.#filterFn = ALWAYS;
-        break;
+
+        // repaint the settled frame with the smooth fill
+        return this.#bindFilter;
       }
     }
   }
@@ -416,7 +428,8 @@ export class IntervalRenderer implements Renderer {
               context,
               waveColor,
               state.configuration.showRmsBand,
-              that.getPixelRatio()
+              that.getPixelRatio(),
+              that.#zooming || that.#dragging
             );
           }
         }
@@ -510,7 +523,9 @@ export function renderWave(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   color: string,
   showRmsBand: boolean,
-  pixelRatio: number
+  pixelRatio: number,
+  /** Fill the cheap stepped shape, for frames drawn mid-gesture. */
+  stepped = false
 ) {
   const scale = height / 2;
   const center = y + scale;
@@ -526,46 +541,148 @@ export function renderWave(
   // pixels and wash out anything one bucket wide.
   const left = Math.round(x * pixelRatio) / pixelRatio;
 
+  const silent = Math.round(center * pixelRatio) / pixelRatio;
+
   /**
-   * The region between a min/max pair of the packed summary, drawn as a
-   * staircase: flat across each bucket, stepping vertically between them.
-   *
-   * The outline used to be filled as a polygon through the bucket values,
-   * but that interpolates between neighbours: a transient standing alone in
-   * its bucket became a one-pixel-wide sliver whose antialiased tip faded in
-   * proportion to how far it rose above the buckets next to it. Since
-   * zooming changes what those neighbours are, the same peak read as a
-   * different height at every zoom level. A staircase covers each bucket's
-   * full width up to its own extremes, so a peak's height on screen depends
-   * on its bucket alone. One bar per bucket draws the same region, but as
-   * tens of thousands of subpaths it filled several times slower than this
-   * single outline, whose runs of equal rows coalesce into one step.
-   *
-   * Edges are rounded outward to whole device rows - not CSS rows, which
-   * would throw away the vertical precision the display has - so the row at
-   * a spike's tip is fully covered instead of dimmed by coverage. A silent
-   * bucket puts both boundaries on the same row, a zero-area passage that
-   * draws nothing, as the polygon's did.
+   * The device row a bucket's boundary sits on, rounded outward - not to
+   * CSS rows, which would throw away the vertical precision the display
+   * has - so the row at a spike's tip is fully covered instead of dimmed by
+   * coverage. A silent bucket puts both boundaries on the same row, a
+   * zero-area passage that draws nothing, as the old polygon's did.
    */
-  const envelope = (minOffset: number, maxOffset: number) => {
+  const boundary = (
+    minOffset: number,
+    maxOffset: number,
+    index: number,
+    offset: number,
+    roundOut: typeof Math.ceil
+  ) => {
+    const min = data[index * DRAW_STRIDE + minOffset];
+    const max = data[index * DRAW_STRIDE + maxOffset];
+    if (min === 0 && max === 0) return silent;
+
+    const value = data[index * DRAW_STRIDE + offset];
+    return roundOut((value * scale + center) * pixelRatio) / pixelRatio;
+  };
+
+  /**
+   * Smoothness is antialiased diagonals, and those cost real fill time on
+   * busy data - measured at roughly 2.5x a step fill on a zoomed-out
+   * worst case. So, like the summaries themselves, the outline degrades
+   * only while it is in motion: gestures fill the stepped shape, whose
+   * axis-aligned integer-grid edges rasterize with no antialiasing at all,
+   * and the settled frame - the one that gets looked at - fills the smooth
+   * shape.
+   */
+
+  /**
+   * The settled region between a min/max pair: a smooth outline through the
+   * bucket values, with a flat cap across any bucket that is a local
+   * extreme.
+   *
+   * The old outline was a polygon interpolated straight through every
+   * bucket, but interpolation cuts the extremes: a transient standing alone
+   * in its bucket became a one-pixel-wide sliver whose antialiased tip
+   * faded in proportion to how far it rose above the buckets next to it -
+   * and since zooming changes the neighbours, the same peak read as a
+   * different height at every zoom level. Only the extremes have that
+   * problem, so only they change: a local extreme is drawn flat across its
+   * bucket's full width, which covers its true peak row completely and
+   * makes its height a function of its own bucket alone. Between extremes
+   * the outline slopes through bucket midpoints as before - unless the jump
+   * exceeds a few device rows, where a vertical step replaces a steep
+   * diagonal the eye reads as a wall anyway and the rasterizer pays dearly
+   * to antialias.
+   */
+  const smoothEnvelope = (minOffset: number, maxOffset: number) => {
     const region = new Path2D();
 
-    const silent = Math.round(center * pixelRatio) / pixelRatio;
+    // steeper than this many device rows per bucket renders as a step
+    const threshold = 3 / pixelRatio;
 
-    const boundary = (index: number, offset: number, roundOut: typeof Math.ceil) => {
-      const min = data[index * DRAW_STRIDE + minOffset];
-      const max = data[index * DRAW_STRIDE + maxOffset];
-      if (min === 0 && max === 0) return silent;
+    const side = (
+      offset: number,
+      roundOut: typeof Math.ceil,
+      outward: (value: number, before: number, after: number) => boolean,
+      reversed: boolean
+    ) => {
+      const at = (index: number) =>
+        boundary(minOffset, maxOffset, index, offset, roundOut);
 
-      const value = data[index * DRAW_STRIDE + offset];
-      return roundOut((value * scale + center) * pixelRatio) / pixelRatio;
+      let previous: number | null = null;
+      const go = (x: number, value: number) => {
+        if (previous === null) {
+          if (reversed) region.lineTo(x, value);
+          else region.moveTo(x, value);
+        } else if (Math.abs(value - previous) > threshold) {
+          region.lineTo(x, previous);
+          region.lineTo(x, value);
+        } else {
+          region.lineTo(x, value);
+        }
+        previous = value;
+      };
+
+      for (let i = 0; i < count; i++) {
+        const index = reversed ? count - 1 - i : i;
+        const value = at(index);
+        const column = left + index * step;
+
+        const nearEdge = reversed ? column + step : column;
+        const farEdge = reversed ? column : column + step;
+
+        // A plateau's interior slopes through equal midpoints - collinear
+        // along the extreme row, so the row stays fully covered without a
+        // cap's extra segments; only where the boundary strictly turns does
+        // a cap appear.
+        const caps =
+          i === 0 ||
+          i === count - 1 ||
+          outward(value, at(index - 1), at(index + 1));
+
+        if (caps) {
+          go(nearEdge, value);
+          region.lineTo(farEdge, value);
+        } else {
+          go(column + step / 2, value);
+        }
+      }
     };
 
-    // along the min side, left to right
-    let previous = boundary(0, minOffset, Math.floor);
+    // canvas y grows downward: on the min side smaller y is further out, on
+    // the max side larger y is. Outward means strictly beyond at least one
+    // neighbour and no closer than the other.
+    side(
+      minOffset,
+      Math.floor,
+      (v, a, b) => (v <= a && v < b) || (v < a && v <= b),
+      false
+    );
+    side(
+      maxOffset,
+      Math.ceil,
+      (v, a, b) => (v >= a && v > b) || (v > a && v >= b),
+      true
+    );
+    region.closePath();
+
+    return region;
+  };
+
+  /**
+   * The in-motion region between a min/max pair: a staircase, flat across
+   * each bucket, stepping only where the snapped row changes. Covers the
+   * same rows per bucket as the smooth shape - peaks hold their height
+   * while the view moves - and every edge is axis-aligned on the integer
+   * grid, so nothing antialiases.
+   */
+  const steppedEnvelope = (minOffset: number, maxOffset: number) => {
+    const region = new Path2D();
+
+    let previous = boundary(minOffset, maxOffset, 0, minOffset, Math.floor);
     region.moveTo(left, previous);
     for (let i = 1; i < count; i++) {
-      const top = boundary(i, minOffset, Math.floor);
+      const top = boundary(minOffset, maxOffset, i, minOffset, Math.floor);
       if (top !== previous) {
         region.lineTo(left + i * step, previous);
         region.lineTo(left + i * step, top);
@@ -574,11 +691,16 @@ export function renderWave(
     }
     region.lineTo(left + count * step, previous);
 
-    // and back along the max side
-    previous = boundary(count - 1, maxOffset, Math.ceil);
+    previous = boundary(
+      minOffset,
+      maxOffset,
+      count - 1,
+      maxOffset,
+      Math.ceil
+    );
     region.lineTo(left + count * step, previous);
     for (let i = count - 2; i >= 0; i--) {
-      const bottom = boundary(i, maxOffset, Math.ceil);
+      const bottom = boundary(minOffset, maxOffset, i, maxOffset, Math.ceil);
       if (bottom !== previous) {
         region.lineTo(left + (i + 1) * step, previous);
         region.lineTo(left + (i + 1) * step, bottom);
@@ -590,6 +712,8 @@ export function renderWave(
 
     return region;
   };
+
+  const envelope = stepped ? steppedEnvelope : smoothEnvelope;
 
   ctx.fillStyle = color;
 
