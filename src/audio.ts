@@ -13,10 +13,14 @@ const BASE_BUCKET = 64;
 const LEVEL_STRIDE = 3;
 
 /**
- * Pixels spanning at least this many samples have their edges snapped to the
- * bucket grid, so their folds touch no raw samples at all. Snapping moves an
- * edge by at most half a bucket, which at this span is a fraction of the
- * pixel's own width; below it the unsnapped edges are cheap to scan anyway.
+ * Pixels spanning at least this many samples are eligible for edge snapping
+ * while a zoom gesture is in flight: edges land on the bucket grid, so folds
+ * touch no raw samples at all. Snapping moves an edge by at most half a
+ * bucket - a fraction of the pixel's own width at this span - but that is
+ * still enough to bounce a transient between two neighbouring pixels as the
+ * boundary re-rounds under a changing zoom, which is why it is only ever
+ * applied mid-gesture, where the image is in motion. At rest every pixel is
+ * exact. Below the threshold the unsnapped edges are cheap to scan anyway.
  */
 const SNAP_THRESHOLD = BASE_BUCKET * 4;
 
@@ -51,6 +55,12 @@ export interface CacheData {
   width: number;
   spp: number;
   sampleRate: number;
+  /**
+   * Whether these pixels were computed with snapped edges. A summary is
+   * homogeneous - extending it keeps the quality it was started with - so
+   * exact and snapped pixels never sit next to each other in one array.
+   */
+  snapped: boolean;
   drawData: DrawData;
 }
 
@@ -169,6 +179,10 @@ export class AudioSummaryCache {
    * its new position rather than recomputed.
    *
    * @param spp samples per pixel, i.e. the current zoom level
+   * @param snap allow snapped edges for a full recompute, for calls made
+   *   while a zoom gesture is still moving. Never downgrades: extending an
+   *   exact summary stays exact, and the settling call with snap unset
+   *   discards a snapped summary wholesale.
    */
   summarize(
     data: Float32Array,
@@ -176,7 +190,8 @@ export class AudioSummaryCache {
     startMs: number,
     durationMs: number,
     spp: number,
-    sampleRate: number
+    sampleRate: number,
+    snap = false
   ): DrawData {
     if (spp <= 0 || durationMs <= 0 || sampleRate <= 0) return EMPTY;
 
@@ -186,12 +201,13 @@ export class AudioSummaryCache {
 
     if (width <= 0) return EMPTY;
 
-    const { drawData, gaps } = this.#reuseCachedData(
+    const { drawData, gaps, snapped } = this.#reuseCachedData(
       cacheKey,
       startPixel,
       width,
       spp,
-      sampleRate
+      sampleRate,
+      snap
     );
 
     if (gaps.length > 0) {
@@ -206,12 +222,20 @@ export class AudioSummaryCache {
           from,
           to,
           spp,
+          snapped,
           this.#stats
         );
       }
     }
 
-    this.#cache.set(cacheKey, { startPixel, width, spp, sampleRate, drawData });
+    this.#cache.set(cacheKey, {
+      startPixel,
+      width,
+      spp,
+      sampleRate,
+      snapped,
+      drawData,
+    });
 
     return drawData;
   }
@@ -264,21 +288,31 @@ export class AudioSummaryCache {
     startPixel: number,
     width: number,
     spp: number,
-    sampleRate: number
-  ): { drawData: DrawData; gaps: Array<[number, number]> } {
+    sampleRate: number,
+    snap: boolean
+  ): { drawData: DrawData; gaps: Array<[number, number]>; snapped: boolean } {
     const size = width * DRAW_STRIDE;
     const cached = this.#cache.get(cacheKey);
 
     // A change in zoom level or sample rate moves every pixel onto a different
-    // grid, so nothing can be carried over.
+    // grid, so nothing can be carried over. Snapped pixels are also thrown
+    // away when the caller wants exact ones - that is the refinement pass at
+    // the end of a zoom gesture.
     const reusable =
       cached !== undefined &&
       cached.spp === spp &&
-      cached.sampleRate === sampleRate;
+      cached.sampleRate === sampleRate &&
+      (snap || !cached.snapped);
 
     if (!reusable) {
-      return { drawData: new Float32Array(size), gaps: [[0, width]] };
+      const snapped = snap && spp >= SNAP_THRESHOLD;
+      return { drawData: new Float32Array(size), gaps: [[0, width]], snapped };
     }
+
+    // Gap pixels extend the cached summary, so they keep its quality: mixing
+    // exact and snapped pixels in one array would make neighbouring pixels
+    // disagree about where their shared edge is.
+    const snapped = cached!.snapped;
 
     // Overlap between the cached window and the requested one, in grid pixels.
     const from = Math.max(startPixel, cached!.startPixel);
@@ -286,7 +320,7 @@ export class AudioSummaryCache {
     const overlap = to - from;
 
     if (overlap <= 0) {
-      return { drawData: new Float32Array(size), gaps: [[0, width]] };
+      return { drawData: new Float32Array(size), gaps: [[0, width]], snapped };
     }
 
     const source = from - cached!.startPixel;
@@ -316,7 +350,7 @@ export class AudioSummaryCache {
     if (target > 0) gaps.push([0, target]);
     if (target + overlap < width) gaps.push([target + overlap, width]);
 
-    return { drawData, gaps };
+    return { drawData, gaps, snapped };
   }
 }
 
@@ -336,15 +370,11 @@ function summarizeRange(
   from: number,
   to: number,
   spp: number,
+  snap: boolean,
   stats: { sampleReads: number; bucketReads: number }
 ) {
   const length = data.length;
   const fold: Fold = { min: 0, max: 0, sumSquares: 0 };
-
-  // Whether edges snap depends only on spp, so every pixel in the window -
-  // and every pixel of any window at this zoom level - decides it the same
-  // way, keeping neighbours tiled exactly.
-  const snap = spp >= SNAP_THRESHOLD;
 
   for (let pixel = from; pixel < to; pixel++) {
     // Rounding both edges off the grid index keeps neighbouring pixels tiled

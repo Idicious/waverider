@@ -188,18 +188,8 @@ test.describe("summarizeAudio", () => {
       { url: AUDIO_MODULE_URL }
     );
 
-    // At this zoom level pixel edges are snapped to the summary's bucket
-    // grid, which can hand a burst's boundary sample-run to the neighbouring
-    // pixel - one pixel of softness, never more. The hardcoded-sample-rate
-    // bug this test guards against shifts the whole burst by several pixels,
-    // which the tolerance still catches.
-    for (const placed of [result.at44100, result.at48000]) {
-      expect(placed.width).toBe(100);
-      expect(placed.first).toBeGreaterThanOrEqual(49);
-      expect(placed.first).toBeLessThanOrEqual(50);
-      expect(placed.last).toBeGreaterThanOrEqual(59);
-      expect(placed.last).toBeLessThanOrEqual(60);
-    }
+    expect(result.at44100).toEqual({ first: 50, last: 59, width: 100 });
+    expect(result.at48000).toEqual({ first: 50, last: 59, width: 100 });
   });
 
   test("keeps full amplitude in the pixel that ends the buffer", async ({

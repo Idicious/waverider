@@ -160,6 +160,13 @@ export class WaveShaper {
 
       this.#onZoom.forEach((fn) => fn(e));
       this.#ee.emit("bind");
+    })
+    // Fires when the gesture settles - mouseup, touchend, or the wheel going
+    // idle. Renderers that degrade quality while the view is in motion use
+    // this pass to refine, so it rebinds even though the scale is unchanged.
+    .on("end", (e: d3.D3ZoomEvent<any, any>) => {
+      this.#onZoom.forEach((fn) => fn(e));
+      this.#ee.emit("bind");
     });
 
   #selecting = false;

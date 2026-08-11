@@ -79,6 +79,14 @@ export class IntervalRenderer implements Renderer {
     this.#filterFn = ALWAYS;
   };
 
+  /**
+   * True while a zoom gesture is moving the view. Summaries computed in that
+   * window may snap pixel edges to the summary's bucket grid for speed; the
+   * gesture's end event clears this and rebinds, so what is on screen at
+   * rest is always exact.
+   */
+  #zooming = false;
+
   constructor(
     private readonly bindFn: (data: Interval, type: symbol) => string,
     private readonly releaseFn: (color: string) => void,
@@ -95,6 +103,10 @@ export class IntervalRenderer implements Renderer {
     for (const track of state.tracks) {
       this.#colorMap.set(track.id, track.color);
     }
+  }
+
+  onZoom(e: d3.D3ZoomEvent<any, any>) {
+    this.#zooming = e.type === "zoom";
   }
 
   onDrag(
@@ -233,7 +245,8 @@ export class IntervalRenderer implements Renderer {
           msIntoInterval + interval.offsetStart,
           intervalScreenDuration,
           samplesPerPixel,
-          this.sampleRate
+          this.sampleRate,
+          this.#zooming
         )
       );
     }
@@ -253,7 +266,13 @@ export class IntervalRenderer implements Renderer {
 
     // One bucket per device pixel, so this should track the widest interval's
     // on screen width times the device pixel ratio.
-    return { waveformBuckets: widest, ...this.#audioCache.diagnostics() };
+    return {
+      waveformBuckets: widest,
+      // 1 only mid-gesture; at rest this must read 0, or the exact
+      // refinement pass never ran and approximate pixels are on screen.
+      waveformApproximate: this.#zooming ? 1 : 0,
+      ...this.#audioCache.diagnostics(),
+    };
   }
 
   /** Called when the owning WaveShaper is destroyed. */

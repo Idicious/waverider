@@ -83,8 +83,9 @@ test("paints again when state changes", async ({ page }) => {
 });
 
 test("repaints on zoom and pan", async ({ page }) => {
-  // the zoom behaviour lost its end handler, so this is the path that has to
-  // be carried by the bind emit alone
+  // mid-gesture repaints are carried by the bind emitted on every zoom tick;
+  // the end handler only refines quality afterwards, so losing the per-tick
+  // emit would freeze the view until the gesture finished
   await loadPage(page);
 
   const snapshot = () =>
@@ -125,6 +126,11 @@ test("repaints on zoom and pan", async ({ page }) => {
       previous,
     zoomed
   );
+
+  // The gesture's end event refines the waveform from approximate to exact
+  // pixels, which is one more paint on its own frame; let it flush so the
+  // quiet window below measures rest, not the tail of the gesture.
+  await page.waitForTimeout(100);
 
   // and goes quiet again once the gesture is over
   expect((await countPaints(page, 400)).visible).toBe(0);

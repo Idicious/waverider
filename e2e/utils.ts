@@ -84,6 +84,13 @@ export async function zoom(page: Page, location: Location, level: number) {
   await page.keyboard.down(modifier);
   await page.mouse.wheel(0, level / scale);
   await page.keyboard.up(modifier);
+
+  // d3 keeps the wheel gesture open for ~150ms after the last event and the
+  // waveform refines from approximate to exact pixels on its end. Without
+  // settling here a screenshot races that refinement and captures whichever
+  // side of it the scheduler lands on.
+  await page.waitForTimeout(300);
+  await waitForRender(page);
 }
 
 /**
