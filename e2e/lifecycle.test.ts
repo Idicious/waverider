@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cutInterval, getScales, getState, loadPage } from "./utils";
+import { cutInterval, getScales, getState, loadPage, zoom } from "./utils";
 
 /**
  * Covers the things that only go wrong once a WaveShaper has been alive for a
@@ -172,6 +172,37 @@ test("programmatic zoom does not leave a stale transform behind", async ({
     (domains.first[1] - domains.first[0]) * 2,
     -1
   );
+});
+
+test("one wheel notch zooms the same under either modifier", async ({
+  page,
+}) => {
+  // d3's default wheelDelta multiplies by ten whenever ctrlKey is held, so
+  // before WaveShaper supplied its own, a notch zoomed 2^20x on the platforms
+  // that gate zoom with Ctrl against 2^4x on macOS. That is far enough past the
+  // audio that the summary window degenerates and the waveform stops being
+  // drawn, and it only showed up when the suite ran on a second platform.
+  // Configuring the key here pins the invariant on whichever one is to hand.
+  const spans: number[] = [];
+
+  for (const key of ["meta", "ctrl"] as const) {
+    await loadPage(page);
+
+    // Reached directly: the modifier is read from configuration on every event
+    // and there is no setter for it.
+    await page.evaluate((k) => {
+      (globalThis as any)["WaveShaper"].state.configuration.modifierKey = k;
+    }, key);
+
+    const before = (await getScales(page)).xScale.domain();
+    await zoom(page, { time: 0, track: "1" }, -1000);
+    const after = (await getScales(page)).xScale.domain();
+
+    expect(after[1] - after[0]).toBeLessThan(before[1] - before[0]);
+    spans.push(after[1] - after[0]);
+  }
+
+  expect(spans[1]).toBe(spans[0]);
 });
 
 /**

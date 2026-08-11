@@ -3,8 +3,8 @@ import type { Page } from "@playwright/test";
 import { scaleBand, scaleLinear } from "d3";
 import type { ScaleBand, ScaleLinear } from "d3";
 import { fileURLToPath } from "node:url";
-import type { Interval, ScaleData, WaveShaperState } from "src/types";
-import { invertYScale } from "src/utils";
+import type { Interval, ScaleData, WaveShaperState } from "../src/types";
+import { invertYScale } from "../src/utils";
 
 export const RESIZE_HANDLE_WIDTH = 5;
 
@@ -72,13 +72,58 @@ export async function zoom(page: Page, location: Location, level: number) {
 
   await page.mouse.move(box.x + coords.x, box.y + coords.y);
 
+  // page.mouse.wheel inflates the delta by the host display's backing scale
+  // factor, 2 on a retina Mac and 1 in the CI container, which is not readable
+  // from inside the page (devicePixelRatio reports 1 either way) and so has to
+  // be measured. Uncorrected, the same `level` zooms twice as far on a retina
+  // machine, which makes the recorded screenshots depend on whoever's display
+  // produced them. The other half of this — d3 boosting ctrl+wheel tenfold — is
+  // handled by the library's own wheelDelta rather than compensated for here.
+  const scale = await measureWheelScale(page);
+
   await page.keyboard.down(modifier);
-  await page.mouse.wheel(0, level);
+  await page.mouse.wheel(0, level / scale);
   await page.keyboard.up(modifier);
 }
 
+/**
+ * How much page.mouse.wheel inflates a delta before the page sees it. Expects
+ * the cursor to already be over the canvas, and probes without a modifier held
+ * so that d3's zoom filter drops the event: the scaling is observed without
+ * moving the view the caller is about to assert on.
+ */
+async function measureWheelScale(page: Page): Promise<number> {
+  const PROBE = -100;
+
+  await page.evaluate(() => {
+    (globalThis as any).__wheelProbe = null;
+    window.addEventListener(
+      "wheel",
+      (e) => ((globalThis as any).__wheelProbe = e.deltaY),
+      { once: true, capture: true }
+    );
+  });
+
+  await page.mouse.wheel(0, PROBE);
+
+  // page.mouse.wheel resolves before the event reaches the page, so reading the
+  // probe straight away races it and silently reports no scaling at all.
+  await page.waitForFunction(
+    () => (globalThis as any).__wheelProbe !== null
+  );
+
+  const observed = await page.evaluate(
+    () => (globalThis as any).__wheelProbe as number
+  );
+
+  return observed / PROBE;
+}
+
 export async function expectScreenshot(page: Page) {
-  const screenshot = await page.screenshot();
+  // Scoped to the canvas rather than the page: a full-page shot also captures
+  // the demo's labels and native checkboxes, which rasterize with the
+  // platform's fonts and form-control theme and drown the render in the diff.
+  const screenshot = await page.locator("canvas").screenshot();
   expect(screenshot).toMatchSnapshot();
 }
 

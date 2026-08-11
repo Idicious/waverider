@@ -1,7 +1,7 @@
 import { WaveShaper } from "../../src";
 import { DataLoader } from "./data-loader";
 import type ApiResponse from "../data/session.json";
-import type { Automation } from "src/types";
+import type { Automation } from "../../src/types";
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const automationCb = document.getElementById("automation") as HTMLInputElement;
