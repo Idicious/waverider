@@ -79,6 +79,14 @@ export class IntervalRenderer implements Renderer {
     this.#filterFn = ALWAYS;
   };
 
+  /**
+   * True while a zoom gesture is moving the view. Summaries computed in that
+   * window may snap pixel edges to the summary's bucket grid for speed; the
+   * gesture's end event clears this and rebinds, so what is on screen at
+   * rest is always exact.
+   */
+  #zooming = false;
+
   constructor(
     private readonly bindFn: (data: Interval, type: symbol) => string,
     private readonly releaseFn: (color: string) => void,
@@ -95,6 +103,13 @@ export class IntervalRenderer implements Renderer {
     for (const track of state.tracks) {
       this.#colorMap.set(track.id, track.color);
     }
+  }
+
+  onZoom(e: d3.D3ZoomEvent<any, any>) {
+    // Programmatic transforms carry no sourceEvent and never see a matching
+    // end pass, so treating one as a gesture would leave summaries degraded
+    // until the next real gesture settled.
+    this.#zooming = e.type === "zoom" && e.sourceEvent != null;
   }
 
   onDrag(
@@ -233,7 +248,8 @@ export class IntervalRenderer implements Renderer {
           msIntoInterval + interval.offsetStart,
           intervalScreenDuration,
           samplesPerPixel,
-          this.sampleRate
+          this.sampleRate,
+          this.#zooming
         )
       );
     }
@@ -253,7 +269,13 @@ export class IntervalRenderer implements Renderer {
 
     // One bucket per device pixel, so this should track the widest interval's
     // on screen width times the device pixel ratio.
-    return { waveformBuckets: widest };
+    return {
+      waveformBuckets: widest,
+      // 1 only mid-gesture; at rest this must read 0, or the exact
+      // refinement pass never ran and approximate pixels are on screen.
+      waveformApproximate: this.#zooming ? 1 : 0,
+      ...this.#audioCache.diagnostics(),
+    };
   }
 
   /** Called when the owning WaveShaper is destroyed. */
@@ -502,7 +524,11 @@ export function renderWave(
     Math.floor(data.length / DRAW_STRIDE)
   );
 
-  const end = x + count * step;
+  // Columns sit on the device pixel grid - the summary holds one bucket per
+  // device pixel, so a fractional origin would smear every bucket across two
+  // pixels and wash out anything one bucket wide.
+  const left = Math.round(x * pixelRatio) / pixelRatio;
+  const end = left + count * step;
 
   // Snapping keeps the outline off half-covered rows, which would otherwise
   // wash it out. It is a device pixel grid rather than a CSS one: rounding to
@@ -511,21 +537,72 @@ export function renderWave(
   const snap = (value: number) =>
     Math.ceil((value * scale + center) * pixelRatio) / pixelRatio;
 
-  /** Fills between the centre line and a min/max pair of the packed summary. */
+  /**
+   * A bucket must rise at least this far - in device rows - above both of
+   * its neighbours before its vertex is drawn as a flat cap. Below it the
+   * underdraw of a plain vertex is a fraction of a row, which no zoom level
+   * can make visible.
+   */
+  const threshold = 2 / pixelRatio;
+
+  /**
+   * Fills between the centre line and a min/max pair of the packed summary,
+   * interpolating through the bucket values exactly as it always has - with
+   * one correction. A plain polygon vertex cuts an isolated extreme: the
+   * fill around it is a one-pixel-wide sliver whose antialiased tip fades in
+   * proportion to how far the bucket rises above its neighbours, and since
+   * zooming changes the neighbours, the same transient read as a different
+   * height at every zoom level. So a vertex that stands at least
+   * `threshold` above both neighbours is drawn flat across its bucket's
+   * full width instead, rounded outward to a whole device row: its true
+   * peak row is covered completely and its height depends on its own
+   * bucket alone. Everything else keeps the smooth interpolated outline -
+   * capping every extreme was tried and made the whole waveform read
+   * blocky, besides costing a multiple of this fill on busy audio.
+   */
   const envelope = (minOffset: number, maxOffset: number) => {
     const region = new Path2D();
 
-    region.moveTo(x, center);
-    for (let i = 0; i < count; i++) {
-      region.lineTo(x + i * step, snap(data[i * DRAW_STRIDE + minOffset]));
-    }
-    region.lineTo(end, center);
+    const line = (
+      offset: number,
+      outwardSign: number,
+      roundOut: typeof Math.ceil
+    ) => {
+      region.moveTo(left, center);
 
-    region.moveTo(x, center);
-    for (let i = 0; i < count; i++) {
-      region.lineTo(x + i * step, snap(data[i * DRAW_STRIDE + maxOffset]));
-    }
-    region.lineTo(end, center);
+      // the path anchors to the centre line on both ends, so the missing
+      // neighbours of the first and last buckets count as silence
+      let previous = center;
+      for (let i = 0; i < count; i++) {
+        const value = data[i * DRAW_STRIDE + offset] * scale + center;
+        const next =
+          i + 1 < count
+            ? data[(i + 1) * DRAW_STRIDE + offset] * scale + center
+            : center;
+
+        const prominent =
+          outwardSign * (previous - value) >= threshold &&
+          outwardSign * (next - value) >= threshold;
+
+        if (prominent) {
+          const capped =
+            roundOut(value * pixelRatio) / pixelRatio;
+          region.lineTo(left + i * step, capped);
+          region.lineTo(left + (i + 1) * step, capped);
+        } else {
+          region.lineTo(left + i * step, snap(data[i * DRAW_STRIDE + offset]));
+        }
+
+        previous = value;
+      }
+
+      region.lineTo(end, center);
+    };
+
+    // canvas y grows downward: on the min side smaller y is further out, on
+    // the max side larger y is - and the cap rounds outward accordingly
+    line(minOffset, 1, Math.floor);
+    line(maxOffset, -1, Math.ceil);
     region.closePath();
 
     return region;

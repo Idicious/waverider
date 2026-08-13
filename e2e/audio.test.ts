@@ -552,6 +552,108 @@ test.describe("waveform rendering", () => {
     expect(await countColor(page, [0, 0, 0])).toBeGreaterThan(solidOn);
   });
 
+  test("keeps a transient's peak height fixed across zoom levels", async ({
+    page,
+  }) => {
+    // The outline used to be filled as a polygon interpolated between
+    // neighbouring buckets, so a transient alone in its bucket rendered as a
+    // sliver whose antialiased tip faded by an amount that depended on the
+    // buckets next to it - and those change with every zoom level. The same
+    // peak must read as the same height no matter the zoom.
+    await loadPage(page);
+
+    const { heights, bandwidth } = await page.evaluate(async () => {
+      const ws = (globalThis as any)["WaveShaper"];
+
+      // One full-scale sample in two seconds of silence. The exact sample
+      // rate does not matter: the spike is found by scanning, not predicted.
+      const data = new Float32Array(96000);
+      data[48000] = 0.9;
+
+      ws.updateState((state: any) => {
+        state.audioData = [{ id: "spike", data }];
+        state.intervals = [
+          {
+            id: "spike-interval",
+            start: 0,
+            offsetStart: 0,
+            end: 2000,
+            index: 1,
+            track: "1",
+            data: "spike",
+            fadeIn: 0,
+            fadeOut: 0,
+          },
+        ];
+        state.configuration.showAutomation = false;
+        state.configuration.showRmsBand = false;
+        return [state, undefined, undefined];
+      });
+      ws.process();
+
+      const measure = () => {
+        const scales = ws.getScaleData();
+        const [d0, d1] = scales.x.domain;
+        const [r0, r1] = scales.x.range;
+        const toX = (t: number) => ((t - d0) / (d1 - d0)) * (r1 - r0) + r0;
+
+        // The resize handles at the interval's edges are solid black and
+        // full height, so the scan stays away from them and measures only
+        // the wave bars.
+        const lo = Math.ceil(toX(0)) + 10;
+        const hi = Math.floor(toX(2000)) - 10;
+
+        const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+        const { data: px, width } = ctx.getImageData(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+
+        let tallest = 0;
+        for (let x = Math.max(0, lo); x <= Math.min(width - 1, hi); x++) {
+          let first = -1;
+          let last = -1;
+          for (let y = 0; y < canvas.height; y++) {
+            const i = (y * width + x) * 4;
+            const dark =
+              px[i + 3] > 200 && px[i] + px[i + 1] + px[i + 2] < 150;
+            if (dark) {
+              if (first < 0) first = y;
+              last = y;
+            }
+          }
+          if (first >= 0) tallest = Math.max(tallest, last - first + 1);
+        }
+        return tallest;
+      };
+
+      const heights: number[] = [];
+      for (const spp of [300, 441, 640, 900, 1323, 1900]) {
+        ws.zoom(spp, 0);
+        ws.process();
+        heights.push(measure());
+      }
+
+      const scales = ws.getScaleData();
+      const [y0, y1] = scales.y.range;
+      const tracks = scales.y.domain.length;
+      const bandwidth = ((y1 - y0) / tracks) * (1 - scales.y.padding);
+
+      return { heights, bandwidth };
+    });
+
+    // every zoom level must actually show the spike...
+    for (const height of heights) {
+      expect(height).toBeGreaterThan(bandwidth * 0.35);
+    }
+
+    // ...at exactly the same height
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
+  });
+
   test("keeps drawing a waveform after a cut", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
