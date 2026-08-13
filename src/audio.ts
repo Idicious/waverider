@@ -99,8 +99,11 @@ class AudioPyramid {
 
       for (let i = start; i < end; i++) {
         const val = data[i];
-        if (val < min) min = val;
-        if (val > max) max = val;
+        // Math.min/max compile to branchless float instructions; comparing
+        // and assigning branches instead, and audio crosses a running
+        // min/max unpredictably enough that those branches miss constantly.
+        min = Math.min(min, val);
+        max = Math.max(max, val);
         sumSquares += val * val;
       }
 
@@ -469,10 +472,13 @@ function foldRange(
     Math.ceil(start / BASE_BUCKET) * BASE_BUCKET
   );
 
+  // Both raw loops fold with Math.min/max rather than compare-and-assign:
+  // the branches mispredict on real audio and were most of this function's
+  // profile, while the branchless forms cost the same cycle every sample.
   for (; i < alignedStart; i++) {
     const val = data[i];
-    if (val < min) min = val;
-    if (val > max) max = val;
+    min = Math.min(min, val);
+    max = Math.max(max, val);
     sumSquares += val * val;
   }
 
@@ -508,8 +514,8 @@ function foldRange(
   const tailStart = i;
   for (; i < end; i++) {
     const val = data[i];
-    if (val < min) min = val;
-    if (val > max) max = val;
+    min = Math.min(min, val);
+    max = Math.max(max, val);
     sumSquares += val * val;
   }
 
