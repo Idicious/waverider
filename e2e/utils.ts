@@ -21,8 +21,30 @@ export async function loadPage(page: Page) {
 
   expect(canvas).not.toBeNull();
   await waitForRender(page);
+  await waitForExactWaveforms(page);
 
   return canvas;
+}
+
+/**
+ * Pyramids build in a worker while the first frames draw from decimated
+ * fallback summaries. Anything comparing pixels needs the refined state, so
+ * wait for the builds to land and the refine paint to flush.
+ */
+export async function waitForExactWaveforms(page: Page) {
+  await page.waitForFunction(
+    () =>
+      (globalThis as any)["WaveShaper"].getDiagnostics().pyramidsPending === 0
+  );
+
+  // the refine rebinds synchronously when the build lands, but the paint it
+  // asks for happens on the next animation frame
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      )
+  );
 }
 
 /**

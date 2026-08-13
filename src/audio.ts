@@ -13,6 +13,13 @@ const BASE_BUCKET = 64;
 const LEVEL_STRIDE = 3;
 
 /**
+ * Samples inspected per pixel by the approximate summarizer that fills in
+ * while a pyramid is still building - the decimated scan this library used
+ * for everything before pyramids existed.
+ */
+const FALLBACK_RESOLUTION = 128;
+
+/**
  * Pixels spanning at least this many samples are eligible for edge snapping
  * while a zoom gesture is in flight: edges land on the bucket grid, so folds
  * touch no raw samples at all. Snapping moves an edge by at most half a
@@ -67,6 +74,82 @@ export interface CacheData {
 const EMPTY: DrawData = new Float32Array(0);
 
 /**
+ * Build every pyramid level for one buffer.
+ *
+ * Deliberately self-contained - constants arrive as parameters and nothing
+ * from module scope is referenced - because its own source text doubles as
+ * the body of the build worker. A closure would stringify into code that
+ * throws inside the worker, so keep it free-standing.
+ */
+function buildLevels(
+  data: Float32Array,
+  baseBucket: number,
+  levelStride: number
+): Float64Array[] {
+  if (data.length === 0) return [];
+
+  const levels: Float64Array[] = [];
+  const baseCount = Math.ceil(data.length / baseBucket);
+  const base = new Float64Array(baseCount * levelStride);
+
+  for (let bucket = 0; bucket < baseCount; bucket++) {
+    const start = bucket * baseBucket;
+    const end = Math.min(start + baseBucket, data.length);
+
+    let min = Infinity;
+    let max = -Infinity;
+    let sumSquares = 0;
+
+    for (let i = start; i < end; i++) {
+      const val = data[i];
+      // Math.min/max compile to branchless float instructions; comparing
+      // and assigning branches instead, and audio crosses a running
+      // min/max unpredictably enough that those branches miss constantly.
+      min = Math.min(min, val);
+      max = Math.max(max, val);
+      sumSquares += val * val;
+    }
+
+    const offset = bucket * levelStride;
+    base[offset] = min;
+    base[offset + 1] = max;
+    base[offset + 2] = sumSquares;
+  }
+
+  levels.push(base);
+
+  let previous = base;
+  while (previous.length / levelStride > 1) {
+    const count = Math.ceil(previous.length / levelStride / 2);
+    const next = new Float64Array(count * levelStride);
+
+    for (let bucket = 0; bucket < count; bucket++) {
+      const left = bucket * 2 * levelStride;
+      const right = left + levelStride;
+      const offset = bucket * levelStride;
+
+      if (right < previous.length) {
+        next[offset] = Math.min(previous[left], previous[right]);
+        next[offset + 1] = Math.max(previous[left + 1], previous[right + 1]);
+        next[offset + 2] = previous[left + 2] + previous[right + 2];
+      } else {
+        // Odd tail: the parent covers only its left child's samples. It is
+        // only ever read for ranges that end inside the data, so the
+        // missing right half can never be asked for.
+        next[offset] = previous[left];
+        next[offset + 1] = previous[left + 1];
+        next[offset + 2] = previous[left + 2];
+      }
+    }
+
+    levels.push(next);
+    previous = next;
+  }
+
+  return levels;
+}
+
+/**
  * Multi-resolution summary of one audio buffer.
  *
  * Level k folds the buffer into buckets of BASE_BUCKET << k samples, each
@@ -81,68 +164,7 @@ const EMPTY: DrawData = new Float32Array(0);
  * point where accumulating in single precision visibly distorts the RMS.
  */
 class AudioPyramid {
-  readonly levels: Float64Array[] = [];
-
-  constructor(data: Float32Array) {
-    if (data.length === 0) return;
-
-    const baseCount = Math.ceil(data.length / BASE_BUCKET);
-    const base = new Float64Array(baseCount * LEVEL_STRIDE);
-
-    for (let bucket = 0; bucket < baseCount; bucket++) {
-      const start = bucket * BASE_BUCKET;
-      const end = Math.min(start + BASE_BUCKET, data.length);
-
-      let min = Infinity;
-      let max = -Infinity;
-      let sumSquares = 0;
-
-      for (let i = start; i < end; i++) {
-        const val = data[i];
-        // Math.min/max compile to branchless float instructions; comparing
-        // and assigning branches instead, and audio crosses a running
-        // min/max unpredictably enough that those branches miss constantly.
-        min = Math.min(min, val);
-        max = Math.max(max, val);
-        sumSquares += val * val;
-      }
-
-      const offset = bucket * LEVEL_STRIDE;
-      base[offset] = min;
-      base[offset + 1] = max;
-      base[offset + 2] = sumSquares;
-    }
-
-    this.levels.push(base);
-
-    let previous = base;
-    while (previous.length / LEVEL_STRIDE > 1) {
-      const count = Math.ceil(previous.length / LEVEL_STRIDE / 2);
-      const next = new Float64Array(count * LEVEL_STRIDE);
-
-      for (let bucket = 0; bucket < count; bucket++) {
-        const left = bucket * 2 * LEVEL_STRIDE;
-        const right = left + LEVEL_STRIDE;
-        const offset = bucket * LEVEL_STRIDE;
-
-        if (right < previous.length) {
-          next[offset] = Math.min(previous[left], previous[right]);
-          next[offset + 1] = Math.max(previous[left + 1], previous[right + 1]);
-          next[offset + 2] = previous[left + 2] + previous[right + 2];
-        } else {
-          // Odd tail: the parent covers only its left child's samples. It is
-          // only ever read for ranges that end inside the data, so the
-          // missing right half can never be asked for.
-          next[offset] = previous[left];
-          next[offset + 1] = previous[left + 1];
-          next[offset + 2] = previous[left + 2];
-        }
-      }
-
-      this.levels.push(next);
-      previous = next;
-    }
-  }
+  constructor(readonly levels: Float64Array[]) {}
 }
 
 /** Running fold of a sample range; reused across pixels to avoid allocation. */
@@ -155,9 +177,183 @@ type Fold = {
 /**
  * A pyramid is a pure function of its buffer, so unlike the pixel cache it is
  * safe to share across WaveShapers - and keyed weakly on the buffer, it goes
- * away with the audio without anyone having to say so.
+ * away with the audio without anyone having to say so. An entry with a null
+ * pyramid is one still being built; the waiters run when it lands.
  */
-const PYRAMIDS = new WeakMap<Float32Array, AudioPyramid>();
+type PyramidEntry = {
+  pyramid: AudioPyramid | null;
+  waiters: Set<() => void>;
+};
+
+const PYRAMIDS = new WeakMap<Float32Array, PyramidEntry>();
+
+/** Builds still in flight, module-wide; surfaced through diagnostics(). */
+let pendingBuilds = 0;
+
+/**
+ * The build worker is created from the build function's own source text, so
+ * there is no separate worker file for a bundler to know about. One worker
+ * serves every build; each request carries an id so responses find their
+ * entry no matter the order they land in.
+ */
+const WORKER_SOURCE = `"use strict";
+const buildLevels = ${buildLevels.toString()};
+self.onmessage = (e) => {
+  const { id, data, baseBucket, levelStride } = e.data;
+  const levels = buildLevels(data, baseBucket, levelStride);
+  self.postMessage({ id, levels }, levels.map((level) => level.buffer));
+};`;
+
+const inFlight = new Map<
+  number,
+  { data: Float32Array; resolve: (levels: Float64Array[] | null) => void }
+>();
+let nextBuildId = 0;
+
+/**
+ * Builds waiting for their turn at the worker. Jobs are handed over one at a
+ * time, each starting in its own task: handing a buffer to the worker costs
+ * a copy on this thread, and a burst of first summaries - a session loading
+ * twelve tracks - must not pay twelve copies before its first paint. The
+ * copy itself is a slice with the buffer transferred, which moves at memcpy
+ * speed instead of the structured-clone serializer's.
+ */
+const buildQueue: number[] = [];
+let postScheduled = false;
+
+function pumpBuildQueue() {
+  if (postScheduled || buildQueue.length === 0) return;
+  postScheduled = true;
+
+  setTimeout(() => {
+    postScheduled = false;
+
+    const id = buildQueue.shift();
+    if (id === undefined) return;
+
+    const job = inFlight.get(id);
+    const worker = getBuildWorker();
+
+    if (job === undefined) {
+      pumpBuildQueue();
+      return;
+    }
+
+    if (worker === null) {
+      // the worker died while this job queued; resolve on this thread
+      inFlight.delete(id);
+      job.resolve(null);
+      pumpBuildQueue();
+      return;
+    }
+
+    const copy = job.data.slice();
+    worker.postMessage(
+      { id, data: copy, baseBucket: BASE_BUCKET, levelStride: LEVEL_STRIDE },
+      [copy.buffer]
+    );
+  }, 0);
+}
+
+/** undefined = not tried yet, null = unavailable here. */
+let buildWorker: Worker | null | undefined;
+
+function getBuildWorker(): Worker | null {
+  if (buildWorker !== undefined) return buildWorker;
+
+  try {
+    const url = URL.createObjectURL(
+      new Blob([WORKER_SOURCE], { type: "text/javascript" })
+    );
+    // The worker holds its own reference to the script once constructed, so
+    // the URL can be released immediately.
+    buildWorker = new Worker(url);
+    URL.revokeObjectURL(url);
+
+    buildWorker.onmessage = (e: MessageEvent) => {
+      const job = inFlight.get(e.data.id);
+      inFlight.delete(e.data.id);
+      job?.resolve(e.data.levels);
+
+      // the next queued build gets its turn now that this one is done
+      pumpBuildQueue();
+    };
+
+    // A worker that dies mid-build would otherwise leave summaries
+    // approximate forever: finish its outstanding work here, and stop
+    // handing it new builds.
+    buildWorker.onerror = () => {
+      buildWorker?.terminate();
+      buildWorker = null;
+
+      const outstanding = [...inFlight.values()];
+      inFlight.clear();
+      buildQueue.length = 0;
+      outstanding.forEach((job) => job.resolve(null));
+    };
+  } catch {
+    buildWorker = null;
+  }
+
+  return buildWorker;
+}
+
+/**
+ * Hand back the pyramid for a buffer, or kick off its build and hand back
+ * null. The build runs in a worker when one is available - copying the
+ * buffer over costs a few milliseconds against ~20ms of build per three
+ * minutes of audio, and none of it blocks painting - and synchronously here
+ * when not. onReady fires once the pyramid lands; callers pass a stable
+ * function so waiting twice registers once.
+ */
+function requestPyramid(
+  data: Float32Array,
+  onReady: () => void
+): { pyramid: AudioPyramid | null; started: boolean } {
+  let entry = PYRAMIDS.get(data);
+  let started = false;
+
+  if (entry === undefined) {
+    entry = { pyramid: null, waiters: new Set() };
+    PYRAMIDS.set(data, entry);
+    started = true;
+
+    const worker = data.length > 0 ? getBuildWorker() : null;
+
+    if (worker === null) {
+      entry.pyramid = new AudioPyramid(
+        buildLevels(data, BASE_BUCKET, LEVEL_STRIDE)
+      );
+    } else {
+      const settled = entry;
+      const id = nextBuildId++;
+
+      pendingBuilds++;
+      inFlight.set(id, {
+        data,
+        resolve: (levels) => {
+          // levels is null when the worker died; rebuild here rather than
+          // staying approximate for the lifetime of the buffer
+          settled.pyramid = new AudioPyramid(
+            levels ?? buildLevels(data, BASE_BUCKET, LEVEL_STRIDE)
+          );
+          pendingBuilds--;
+
+          const waiters = [...settled.waiters];
+          settled.waiters.clear();
+          waiters.forEach((waiter) => waiter());
+        },
+      });
+
+      buildQueue.push(id);
+      pumpBuildQueue();
+    }
+  }
+
+  if (entry.pyramid === null) entry.waiters.add(onReady);
+
+  return { pyramid: entry.pyramid, started };
+}
 
 /**
  * Holds the per-key summaries for one WaveShaper.
@@ -171,6 +367,32 @@ export class AudioSummaryCache {
 
   /** Cumulative work counters, surfaced through diagnostics(). */
   #stats = { sampleReads: 0, bucketReads: 0, pyramidsBuilt: 0 };
+
+  /**
+   * Called when a pyramid this cache was waiting on lands. The owner should
+   * re-summarize and repaint: summaries produced before the pyramid existed
+   * are decimated approximations, flagged like snapped ones so any exact
+   * pass recomputes them.
+   */
+  onReady?: () => void;
+
+  /** Stable identity so waiting on several builds registers once each. */
+  #notifyReady = () => {
+    this.onReady?.();
+  };
+
+  /**
+   * Resolve when the pyramid for a buffer is ready, starting the build if
+   * nothing has yet. Rendering never needs this - it starts approximate and
+   * refines through onReady - but a caller that wants exact numbers from
+   * the first summarize, like a test, can await it.
+   */
+  prepare(data: Float32Array): Promise<void> {
+    return new Promise((resolve) => {
+      const { pyramid } = requestPyramid(data, resolve);
+      if (pyramid !== null) resolve();
+    });
+  }
 
   /**
    * Summarize the audio behind a time window into one min/max pair per pixel.
@@ -204,7 +426,7 @@ export class AudioSummaryCache {
 
     if (width <= 0) return EMPTY;
 
-    const { drawData, gaps, snapped } = this.#reuseCachedData(
+    let { drawData, gaps, snapped } = this.#reuseCachedData(
       cacheKey,
       startPixel,
       width,
@@ -217,18 +439,38 @@ export class AudioSummaryCache {
       const pyramid = this.#getPyramid(data);
 
       for (const [from, to] of gaps) {
-        summarizeRange(
-          data,
-          pyramid,
-          drawData,
-          startPixel,
-          from,
-          to,
-          spp,
-          snapped,
-          this.#stats
-        );
+        if (pyramid !== null) {
+          summarizeRange(
+            data,
+            pyramid,
+            drawData,
+            startPixel,
+            from,
+            to,
+            spp,
+            snapped,
+            this.#stats
+          );
+        } else {
+          // The pyramid is still building. Paint something now rather than
+          // block on it: a decimated scan, exactly the summarizer this
+          // library had before pyramids existed.
+          summarizeRangeApproximate(
+            data,
+            drawData,
+            startPixel,
+            from,
+            to,
+            spp,
+            this.#stats
+          );
+        }
       }
+
+      // Approximate pixels wear the snapped flag whatever was asked for, so
+      // the exact pass that follows onReady throws them away wholesale
+      // instead of trusting them.
+      if (pyramid === null) snapped = true;
     }
 
     this.#cache.set(cacheKey, {
@@ -265,16 +507,16 @@ export class AudioSummaryCache {
       summarySampleReads: this.#stats.sampleReads,
       summaryBucketReads: this.#stats.bucketReads,
       pyramidsBuilt: this.#stats.pyramidsBuilt,
+      // Anything above zero means summaries are still approximate and a
+      // refine will land shortly; at rest this must read 0.
+      pyramidsPending: pendingBuilds,
     };
   }
 
   #getPyramid(data: Float32Array) {
-    let pyramid = PYRAMIDS.get(data);
+    const { pyramid, started } = requestPyramid(data, this.#notifyReady);
 
-    if (pyramid === undefined) {
-      pyramid = new AudioPyramid(data);
-      PYRAMIDS.set(data, pyramid);
-
+    if (started) {
       this.#stats.pyramidsBuilt++;
       this.#stats.sampleReads += data.length;
     }
@@ -525,4 +767,73 @@ function foldRange(
   out.min = min;
   out.max = max;
   out.sumSquares = sumSquares;
+}
+
+/**
+ * Compute pixels [from, to) the way this library did before pyramids: every
+ * `skip`th sample, so a transient shorter than the decimation step can be
+ * missed. This only ever paints while a pyramid is still building - the
+ * summaries it produces are flagged for replacement, and the exact pass
+ * that follows the build's completion recomputes them from the pyramid.
+ */
+function summarizeRangeApproximate(
+  data: Float32Array,
+  drawData: DrawData,
+  startPixel: number,
+  from: number,
+  to: number,
+  spp: number,
+  stats: { sampleReads: number }
+) {
+  const skip = Math.max(1, Math.ceil(spp / FALLBACK_RESOLUTION));
+  const length = data.length;
+
+  for (let pixel = from; pixel < to; pixel++) {
+    const first = Math.round((startPixel + pixel) * spp);
+    const last = Math.round((startPixel + pixel + 1) * spp);
+
+    const start = Math.max(first, 0);
+    const end = Math.min(last, length);
+
+    let min = 0;
+    let max = 0;
+    let rms = 0;
+
+    if (end > start) {
+      let sumSquares = 0;
+      let count = 0;
+
+      for (let i = start; i < end; i += skip, count++) {
+        const val = data[i];
+        min = Math.min(min, val);
+        max = Math.max(max, val);
+        sumSquares += val * val;
+      }
+
+      rms = count > 0 ? Math.sqrt(sumSquares / count) : 0;
+      stats.sampleReads += count;
+    } else if (start < length) {
+      // Fewer than one sample per pixel; see summarizeRange, this is the
+      // same interpolated read.
+      const position = Math.max(0, (startPixel + pixel) * spp);
+      const index = Math.min(Math.floor(position), length - 1);
+      const next = Math.min(index + 1, length - 1);
+      const t = Math.min(1, Math.max(0, position - index));
+
+      const value = data[index] + (data[next] - data[index]) * t;
+
+      min = Math.min(0, value);
+      max = Math.max(0, value);
+      rms = Math.abs(value);
+
+      stats.sampleReads += 2;
+    }
+
+    const offset = pixel * DRAW_STRIDE;
+
+    drawData[offset] = min;
+    drawData[offset + 1] = max;
+    drawData[offset + 2] = Math.max(min, -rms);
+    drawData[offset + 3] = Math.min(max, rms);
+  }
 }
