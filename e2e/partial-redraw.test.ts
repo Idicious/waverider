@@ -143,3 +143,72 @@ test("the gesture-end refine repaints everything", async ({ page }) => {
 
   expect(fraction).toBe(1);
 });
+
+test("showPaintRegions tints exactly the repainted region", async ({
+  page,
+}) => {
+  await loadPage(page);
+  const { xScale } = await getScales(page);
+
+  const countOverlay = () =>
+    page.evaluate(() => {
+      const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+      const { data, width } = ctx.getImageData(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+
+      // the overlay border is filled opaque magenta so it reads back exactly
+      let inLeftHalf = 0;
+      let inRightThird = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] === 255 && data[i + 1] === 0 && data[i + 2] === 255) {
+          const x = (i / 4) % width;
+          if (x < width / 2) inLeftHalf++;
+          if (x > (width * 2) / 3) inRightThird++;
+        }
+      }
+      return { inLeftHalf, inRightThird };
+    });
+
+  await page.evaluate(() => {
+    const ws = (globalThis as any)["WaveShaper"];
+    ws.updateState((state: any) => {
+      state.configuration.showPaintRegions = true;
+      // confine the flash subject to the left half of the view
+      state.intervals = state.intervals.filter((i: any) => i.id === "1");
+      state.intervals[0].end = 5000;
+      return [state, undefined, undefined];
+    });
+    ws.process();
+  });
+
+  // drag the clip within the left half: the tint must cover its region and
+  // stay out of the untouched right third
+  await drag(
+    page,
+    { track: "1", time: xScale.invert(100) },
+    { track: "1", time: xScale.invert(160) }
+  );
+
+  const flashed = await countOverlay();
+  expect(flashed.inLeftHalf).toBeGreaterThan(0);
+  expect(flashed.inRightThird).toBe(0);
+
+  // turning the flag off leaves no trace of the overlay
+  await page.evaluate(() => {
+    const ws = (globalThis as any)["WaveShaper"];
+    ws.updateState((state: any) => {
+      state.configuration.showPaintRegions = false;
+      return [state, undefined, undefined];
+    });
+    ws.process();
+  });
+
+  const cleared = await countOverlay();
+  expect(cleared.inLeftHalf).toBe(0);
+  expect(cleared.inRightThird).toBe(0);
+});

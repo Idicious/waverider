@@ -735,6 +735,28 @@ export class WaveShaper {
     // either way. The visible context is unscaled and works in device pixels.
     this.#ctx.clearRect(0, 0, this.#width, this.#height);
     this.#ctx.drawImage(this.#hiddenCanvasDraw, 0, 0);
+
+    // Drawn after the blit and only onto the visible canvas, so the overlay
+    // never reaches the buffer that pan blits shift around; the next paint's
+    // blit wipes it. It survives until then, which reads better than a
+    // one-frame flash under paint-on-change.
+    if (this.state.configuration.showPaintRegions && x1 > x0 && y1 > y0) {
+      const dx = Math.round(x0 * this.#dpr);
+      const dy = Math.round(y0 * this.#dpr);
+      const dw = Math.round((x1 - x0) * this.#dpr);
+      const dh = Math.round((y1 - y0) * this.#dpr);
+      const edge = Math.max(1, Math.round(this.#dpr));
+
+      this.#ctx.fillStyle = "rgba(255, 0, 255, 0.15)";
+      this.#ctx.fillRect(dx, dy, dw, dh);
+
+      // an opaque border, as filled rects so its color reads back exactly
+      this.#ctx.fillStyle = "rgb(255, 0, 255)";
+      this.#ctx.fillRect(dx, dy, dw, edge);
+      this.#ctx.fillRect(dx, dy + dh - edge, dw, edge);
+      this.#ctx.fillRect(dx, dy, edge, dh);
+      this.#ctx.fillRect(dx + dw - edge, dy, edge, dh);
+    }
   }
 
   redrawHidden() {

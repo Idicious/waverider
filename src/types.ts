@@ -89,6 +89,14 @@ export type WaveShaperConfig = {
    * tracks are on screen at once.
    */
   showRmsBand: boolean;
+
+  /**
+   * Debugging aid: tint the region each paint actually repainted, on the
+   * visible canvas only. Paints happen on change, so a tint stays up until
+   * the next one - a drag should flash just the dragged clip, a pan just
+   * the strip its blit exposed, and a zoom or settle the whole area.
+   */
+  showPaintRegions?: boolean;
 };
 
 export type DragFn<TItem> = (
