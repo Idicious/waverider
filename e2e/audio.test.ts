@@ -37,6 +37,7 @@ test.describe("summarizeAudio", () => {
 
         const data = new Float32Array(sampleRate * 10);
         for (let i = 0; i < data.length; i++) data[i] = Math.sin(i / 50) * 0.8;
+        await cache.prepare(data);
 
         let refKey = 0;
         let worst = 0;
@@ -79,6 +80,7 @@ test.describe("summarizeAudio", () => {
 
         const data = new Float32Array(sampleRate * 10);
         for (let i = 0; i < data.length; i++) data[i] = Math.sin(i / 37) * 0.7;
+        await cache.prepare(data);
 
         const windows = [
           [1000, 2000], [1000, 2500], [1000, 1800], [900, 2600],
@@ -122,6 +124,7 @@ test.describe("summarizeAudio", () => {
 
         const data = new Float32Array(sampleRate * 10);
         for (let i = 0; i < data.length; i++) data[i] = Math.sin(i / 50) * 0.8;
+        await cache.prepare(data);
 
         summarizeAudio(data, "zoomed", 1000, 2000, 512, sampleRate);
         const cached = summarizeAudio(data, "zoomed", 1000, 2000, 256, sampleRate);
@@ -155,7 +158,7 @@ test.describe("summarizeAudio", () => {
         const summarizeAudio = cache.summarize.bind(cache);
         const { DRAW_STRIDE } = await import(url);
 
-        const measure = (sampleRate: number) => {
+        const measure = async (sampleRate: number) => {
           const data = new Float32Array(sampleRate * 2);
           for (
             let i = Math.round(0.5 * sampleRate);
@@ -164,6 +167,7 @@ test.describe("summarizeAudio", () => {
           ) {
             data[i] = 0.9;
           }
+          await cache.prepare(data);
 
           // 10ms per pixel, so the burst belongs in pixels 50..59
           const spp = sampleRate / 100;
@@ -183,7 +187,7 @@ test.describe("summarizeAudio", () => {
           return { first, last, width: summary.length / DRAW_STRIDE };
         };
 
-        return { at44100: measure(44100), at48000: measure(48000) };
+        return { at44100: await measure(44100), at48000: await measure(48000) };
       },
       { url: AUDIO_MODULE_URL }
     );
@@ -205,6 +209,7 @@ test.describe("summarizeAudio", () => {
         const { DRAW_STRIDE } = await import(url);
 
         const data = new Float32Array(sampleRate).fill(0.5); // exactly 1000ms
+        await cache.prepare(data);
         // window runs 200ms past the end of the audio
         const summary = summarizeAudio(data, "tail", 800, 400, 512, sampleRate);
 
@@ -242,6 +247,7 @@ test.describe("summarizeAudio", () => {
         for (let i = 0; i < data.length; i++) {
           data[i] = i % spp < 30 ? 0.95 : 0.1 * Math.sin(i / 20);
         }
+        await cache.prepare(data);
 
         const summary = summarizeAudio(data, "peaks", 200, 500, spp, sampleRate);
         const offset = 10 * DRAW_STRIDE;
@@ -271,9 +277,10 @@ test.describe("summarizeAudio", () => {
         const summarizeAudio = cache.summarize.bind(cache);
         const { DRAW_STRIDE } = await import(url);
 
-        const measure = (label: string, positive: (i: number) => boolean) => {
+        const measure = async (label: string, positive: (i: number) => boolean) => {
           const data = new Float32Array(sampleRate);
           for (let i = 0; i < data.length; i++) data[i] = positive(i) ? 1 : -1;
+          await cache.prepare(data);
 
           const summary = summarizeAudio(data, label, 200, 500, 441, sampleRate);
           const offset = 10 * DRAW_STRIDE;
@@ -282,8 +289,8 @@ test.describe("summarizeAudio", () => {
         };
 
         return {
-          mostlyPositive: measure("dutyHigh", (i) => i % 10 !== 0),
-          mostlyNegative: measure("dutyLow", (i) => i % 10 === 0),
+          mostlyPositive: await measure("dutyHigh", (i) => i % 10 !== 0),
+          mostlyNegative: await measure("dutyLow", (i) => i % 10 === 0),
         };
       },
       { url: AUDIO_MODULE_URL, sampleRate: SAMPLE_RATE }
@@ -312,6 +319,7 @@ test.describe("summarizeAudio", () => {
               Math.sin(i / (3 + (shape % 17))) * (shape % 5) * 0.2;
           }
 
+          await cache.prepare(data);
           const summary = summarizeAudio(
             data, "shape" + shape, 100 + shape, 400, 200 + shape, sampleRate
           );
@@ -348,6 +356,7 @@ test.describe("summarizeAudio", () => {
 
         const data = new Float32Array(sampleRate * 2);
         for (let i = 0; i < data.length; i++) data[i] = Math.sin(i / 50) * 0.8;
+        await cache.prepare(data);
 
         summarizeAudio(data, "gone", 0, 500, 512, sampleRate);
         clearCachedData("gone");
@@ -395,6 +404,60 @@ test.describe("summarizeAudio", () => {
     expect(lengths).toEqual([0, 0, 0, 0]);
   });
 
+  test("returns a paintable summary before the pyramid lands", async ({
+    page,
+  }) => {
+    // Builds run in a worker, unawaited: the first summarize must hand back
+    // usable pixels immediately, report the build as pending, notify when it
+    // lands, and produce exact pixels from then on.
+    const result = await page.evaluate(
+      async ({ url, sampleRate }) => {
+        const { AudioSummaryCache } = await import(url);
+        const cache = new AudioSummaryCache();
+
+        const data = new Float32Array(sampleRate * 30);
+        for (let i = 0; i < data.length; i++) data[i] = Math.sin(i / 50) * 0.8;
+
+        let notified = false;
+        cache.onReady = () => {
+          notified = true;
+        };
+
+        const immediate = cache.summarize(data, "k", 0, 2000, 512, sampleRate);
+        const pendingAfterFirstCall =
+          cache.diagnostics().pyramidsPending > 0;
+
+        await cache.prepare(data);
+
+        const refined = cache.summarize(data, "k", 0, 2000, 512, sampleRate);
+
+        const reference = new AudioSummaryCache();
+        await reference.prepare(data);
+        const exact = reference.summarize(data, "x", 0, 2000, 512, sampleRate);
+
+        let worst = 0;
+        for (let i = 0; i < refined.length; i++) {
+          worst = Math.max(worst, Math.abs(refined[i] - exact[i]));
+        }
+
+        return {
+          immediateLength: immediate.length,
+          pendingAfterFirstCall,
+          notified,
+          pendingAfterPrepare: cache.diagnostics().pyramidsPending,
+          worst,
+        };
+      },
+      { url: AUDIO_MODULE_URL, sampleRate: SAMPLE_RATE }
+    );
+
+    expect(result.immediateLength).toBeGreaterThan(0);
+    expect(result.pendingAfterFirstCall).toBe(true);
+    expect(result.notified).toBe(true);
+    expect(result.pendingAfterPrepare).toBe(0);
+    expect(result.worst).toBe(0);
+  });
+
   test("keeps the outline solid below one sample per pixel", async ({
     page,
   }) => {
@@ -412,8 +475,10 @@ test.describe("summarizeAudio", () => {
           data[i] = 0.5 + Math.sin(i / 8) * 0.4;
         }
 
-        return [2, 1, 0.9, 0.5, 0.25, 0.1].map((spp) => {
+        const results = [];
+        for (const spp of [2, 1, 0.9, 0.5, 0.25, 0.1]) {
           const cache = new AudioSummaryCache();
+          await cache.prepare(data);
           const out = cache.summarize(data, "s" + spp, 0, 20, spp, sampleRate);
           const buckets = out.length / DRAW_STRIDE;
 
@@ -424,8 +489,9 @@ test.describe("summarizeAudio", () => {
             }
           }
 
-          return { spp, buckets, flat };
-        });
+          results.push({ spp, buckets, flat });
+        }
+        return results;
       },
       { url: AUDIO_MODULE_URL, sampleRate: SAMPLE_RATE }
     );
@@ -589,6 +655,13 @@ test.describe("waveform rendering", () => {
         state.configuration.showRmsBand = false;
         return [state, undefined, undefined];
       });
+      ws.process();
+
+      // the spike buffer's pyramid builds in a worker; measuring against
+      // the decimated fallback would miss the lone sample at wide zooms
+      while (ws.getDiagnostics().pyramidsPending > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
       ws.process();
 
       const measure = () => {

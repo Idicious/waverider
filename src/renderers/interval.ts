@@ -95,7 +95,14 @@ export class IntervalRenderer implements Renderer {
     /** Device pixels per CSS pixel, read fresh so a resize is picked up. */
     private readonly getPixelRatio: () => number,
     private readonly sampleRate: number
-  ) {}
+  ) {
+    // Pyramids build off the main thread, so early paints draw from
+    // decimated fallback summaries. Those are flagged for replacement; the
+    // rebind here, once a pyramid lands, is what swaps in the exact ones.
+    this.#audioCache.onReady = () => {
+      this.updateState((state) => [state, this.#bindFilter, undefined]);
+    };
+  }
 
   onStateUpdate(state: WaveShaperState) {
     this.#colorMap.clear();
