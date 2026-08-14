@@ -9,6 +9,7 @@ const rmsBandCb = document.getElementById("rms-band") as HTMLInputElement;
 const paintRegionsCb = document.getElementById(
   "paint-regions"
 ) as HTMLInputElement;
+const waveformCb = document.getElementById("waveform") as HTMLInputElement;
 
 (async function main() {
   const dataLoader = new DataLoader();
@@ -28,6 +29,7 @@ const paintRegionsCb = document.getElementById(
   automationCb.checked = configuration.showAutomation;
   rmsBandCb.checked = configuration.showRmsBand;
   paintRegionsCb.checked = configuration.showPaintRegions ?? false;
+  waveformCb.checked = configuration.showWaveform ?? true;
   const audioData = await dataLoader.load(audio, ctx);
 
   const waveShaper = new WaveShaper(canvas, ctx, {
@@ -64,6 +66,17 @@ const paintRegionsCb = document.getElementById(
   paintRegionsCb.addEventListener("change", () => {
     const state = waveShaper.getState();
     state.configuration.showPaintRegions = paintRegionsCb.checked;
+
+    waveShaper.updateState(() => [
+      { ...state, audioData },
+      undefined,
+      undefined,
+    ]);
+  });
+
+  waveformCb.addEventListener("change", () => {
+    const state = waveShaper.getState();
+    state.configuration.showWaveform = waveformCb.checked;
 
     waveShaper.updateState(() => [
       { ...state, audioData },

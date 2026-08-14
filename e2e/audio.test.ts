@@ -654,6 +654,43 @@ test.describe("waveform rendering", () => {
     expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
   });
 
+  test("showWaveform off skips waveform work entirely", async ({ page }) => {
+    await loadPage(page);
+    const withWave = await countWavePixels(page);
+    expect(withWave).toBeGreaterThan(100);
+
+    await page.evaluate(() => {
+      const ws = (globalThis as any)["WaveShaper"];
+      ws.updateState((state: any) => {
+        state.configuration.showWaveform = false;
+        return [state, undefined, undefined];
+      });
+      ws.process();
+    });
+
+    // the waveform bodies go; the resize handles and automation lines are
+    // dark too and legitimately stay, so this is a drop, not a zero
+    expect(await countWavePixels(page)).toBeLessThan(withWave / 2);
+
+    // and no summaries are computed or held for hidden waveforms
+    const buckets = await page.evaluate(
+      () => (globalThis as any)["WaveShaper"].getDiagnostics().waveformBuckets
+    );
+    expect(buckets).toBe(0);
+
+    // toggling back on restores the identical rendering
+    await page.evaluate(() => {
+      const ws = (globalThis as any)["WaveShaper"];
+      ws.updateState((state: any) => {
+        state.configuration.showWaveform = true;
+        return [state, undefined, undefined];
+      });
+      ws.process();
+    });
+
+    expect(await countWavePixels(page)).toBe(withWave);
+  });
+
   test("keeps drawing a waveform after a cut", async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));

@@ -91,6 +91,15 @@ export type WaveShaperConfig = {
   showRmsBand: boolean;
 
   /**
+   * Skip rendering waveforms entirely - intervals draw as plain colored
+   * blocks with their handles. This also skips computing the summaries the
+   * waveforms would need, so it is the cheapest the interval layer gets;
+   * worth having when a session grows past what a machine keeps up with.
+   * Undefined means on.
+   */
+  showWaveform?: boolean;
+
+  /**
    * Debugging aid: tint the region each paint actually repainted, on the
    * visible canvas only. Paints happen on change, so a tint stays up until
    * the next one - a drag should flash just the dragged clip, a pan just

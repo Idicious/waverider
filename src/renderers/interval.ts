@@ -260,8 +260,13 @@ export class IntervalRenderer implements Renderer {
 
     const audioData = this.#getAudioData(state, interval.data);
 
+    // A hidden waveform needs no summary either - with the flag off the
+    // interval layer does no per-sample work at all. The render flag is
+    // checked here too so toggling it back on recomputes on the next bind.
+    const hidden = state.configuration.showWaveform === false;
+
     // Interval is not in viewport, render nothing
-    if (intervalScreenDuration <= 0 || audioData === undefined) {
+    if (hidden || intervalScreenDuration <= 0 || audioData === undefined) {
       this.#drawDataCache.delete(interval.id);
     } else {
       this.#drawDataCache.set(
@@ -454,7 +459,7 @@ export class IntervalRenderer implements Renderer {
         context.fillRect(x, y, width, height);
 
         // audio waveform, not interactive so only render to display canvas
-        if (toHidden === false) {
+        if (toHidden === false && state.configuration.showWaveform !== false) {
           const data = that.#drawDataCache.get(d.id);
           if (data !== undefined) {
             renderWave(
