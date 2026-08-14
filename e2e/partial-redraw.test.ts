@@ -15,16 +15,27 @@ import {
  * honest, and both are pinned here:
  *
  * - whatever shortcuts were taken along the way, a settled canvas must be
- *   indistinguishable from one painted from scratch;
+ *   indistinguishable from one painted from scratch (up to the bounded
+ *   antialiasing noise clipped rasterization introduces - see the helper);
  * - the shortcuts must actually be taken, which the lastPaintFraction
  *   diagnostic makes observable.
  */
 
-/** The canvas, as it is, against the same canvas fully repainted. */
+/**
+ * The canvas, as it is, against the same canvas fully repainted.
+ *
+ * Not a bit-exact comparison: Chromium rasterizes a fill slightly
+ * differently when a clip cuts through its path, so pixels painted under a
+ * partial repaint's clip can sit a few antialiasing units away from a
+ * from-scratch render - deterministic (repainting the same region twice is
+ * bit-identical) and far below visible. The bounds are tight enough that
+ * any real staleness still fails loudly: a stranded hover marker or a
+ * missed strip is hundreds of contiguous pixels at full-contrast deltas.
+ */
 async function expectSettledEqualsFullRepaint(
   page: import("@playwright/test").Page
 ) {
-  const identical = await page.evaluate(() => {
+  const result = await page.evaluate(() => {
     const ws = (globalThis as any)["WaveShaper"];
     const canvas = document.querySelector("canvas") as HTMLCanvasElement;
     const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
@@ -36,14 +47,21 @@ async function expectSettledEqualsFullRepaint(
 
     const repainted = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
 
-    if (settled.length !== repainted.length) return false;
+    let subpixelDiffs = 0;
+    let maxDelta = 0;
     for (let i = 0; i < settled.length; i++) {
-      if (settled[i] !== repainted[i]) return false;
+      const delta = Math.abs(settled[i] - repainted[i]);
+      if (delta > 0) {
+        subpixelDiffs++;
+        if (delta > maxDelta) maxDelta = delta;
+      }
     }
-    return true;
+
+    return { subpixelDiffs, total: settled.length, maxDelta };
   });
 
-  expect(identical).toBe(true);
+  expect(result.maxDelta).toBeLessThanOrEqual(16);
+  expect(result.subpixelDiffs).toBeLessThanOrEqual(result.total / 1000);
 }
 
 test("a settled drag leaves exactly what a full repaint would", async ({
@@ -211,4 +229,68 @@ test("showPaintRegions tints exactly the repainted region", async ({
   const cleared = await countOverlay();
   expect(cleared.inLeftHalf).toBe(0);
   expect(cleared.inRightThird).toBe(0);
+});
+
+test("sub-pixel pan deltas accumulate instead of freezing the canvas", async ({
+  page,
+}) => {
+  // Precision trackpads pan in fractions of a pixel per event. Each blit
+  // moves whole device pixels, so the remainder must carry across ticks -
+  // discarding it left the canvas frozen for the entire gesture.
+  await loadPage(page);
+
+  const modifier = await getModifier(page);
+  const box = (await (await page.$("canvas"))!.boundingBox())!;
+
+  const snapshot = () =>
+    page.evaluate(() =>
+      (document.querySelector("canvas") as HTMLCanvasElement).toDataURL()
+    );
+
+  const before = await snapshot();
+
+  await page.keyboard.down(modifier);
+  await page.mouse.move(box.x + 600, box.y + 100);
+  await page.mouse.down();
+  for (let i = 1; i <= 30; i++) {
+    await page.mouse.move(box.x + 600 - i * 0.6, box.y + 100, { steps: 1 });
+    await page.waitForTimeout(10);
+  }
+
+  // still mid-gesture: ~18px of pan must be visible on screen already
+  const during = await snapshot();
+
+  await page.mouse.up();
+  await page.keyboard.up(modifier);
+
+  expect(during).not.toBe(before);
+});
+
+test("moving the automation hover marker never strands it", async ({
+  page,
+}) => {
+  // The marker is baked into the draw buffer; under partial repaints a
+  // hover change must repaint where it was and where it lands, or a stale
+  // marker survives every later partial paint.
+  await loadPage(page);
+
+  await page.evaluate(() => {
+    const ws = (globalThis as any)["WaveShaper"];
+    ws.updateState((state: any) => {
+      state.configuration.showAutomation = true;
+      return [state, undefined, undefined];
+    });
+    ws.process();
+  });
+
+  const box = (await (await page.$("canvas"))!.boundingBox())!;
+
+  // two hovers over the automation lane: the marker must move, leaving
+  // nothing at the first position
+  await page.mouse.move(box.x + 200, box.y + 100);
+  await page.waitForTimeout(50);
+  await page.mouse.move(box.x + 420, box.y + 100);
+  await page.waitForTimeout(50);
+
+  await expectSettledEqualsFullRepaint(page);
 });

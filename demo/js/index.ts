@@ -1,7 +1,7 @@
 import { WaveShaper } from "../../src";
 import { DataLoader } from "./data-loader";
 import type ApiResponse from "../data/session.json";
-import type { Automation } from "../../src/types";
+import type { Automation, WaveShaperConfig } from "../../src/types";
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const automationCb = document.getElementById("automation") as HTMLInputElement;
@@ -26,10 +26,14 @@ const waveformCb = document.getElementById("waveform") as HTMLInputElement;
     res.json()
   );
 
-  automationCb.checked = configuration.showAutomation;
-  rmsBandCb.checked = configuration.showRmsBand;
-  paintRegionsCb.checked = configuration.showPaintRegions ?? false;
-  waveformCb.checked = configuration.showWaveform ?? true;
+  // session.json only carries the required keys; the optional flags live on
+  // the library's config type
+  const config: WaveShaperConfig = configuration;
+
+  automationCb.checked = config.showAutomation;
+  rmsBandCb.checked = config.showRmsBand;
+  paintRegionsCb.checked = config.showPaintRegions ?? false;
+  waveformCb.checked = config.showWaveform ?? true;
   const audioData = await dataLoader.load(audio, ctx);
 
   const waveShaper = new WaveShaper(canvas, ctx, {

@@ -6,8 +6,10 @@ import type {
   AutomationPoint,
   Selection,
   BoundData,
+  DirtyRect,
   Predicate,
   Renderer,
+  ReportDirtyFn,
   UpdateFn,
   WaveShaperState,
 } from "../types";
@@ -64,12 +66,21 @@ export class AutomationRenderer implements Renderer {
 
   TYPE = Symbol("automation");
 
+  /**
+   * Marker regions whose pixels the last hover change touched, waiting for
+   * the bind that the change requested. Reported as display-only: the
+   * marker never reaches the hit canvas, so repainting it must not force a
+   * hit rebuild on the next probe.
+   */
+  #pendingHoverRects: DirtyRect[] = [];
+
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly bindFn: (data: unknown, type: symbol) => string,
     private readonly releaseFn: (color: string) => void,
     private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
-    private readonly hasModifier: (e: ModifierEvent) => boolean
+    private readonly hasModifier: (e: ModifierEvent) => boolean,
+    private readonly reportDirty: ReportDirtyFn
   ) {}
 
   onSelectStart(
@@ -242,6 +253,9 @@ export class AutomationRenderer implements Renderer {
     xScale: ScaleLinear<number, number>,
     yScale: ScaleBand<string>
   ) {
+    const previousX = this.#hoverX;
+    const previousY = this.#hoverY;
+
     switch (d?.type) {
       case TYPES.AUTOMATION:
       case TYPES.AUTOMATION_POINT: {
@@ -254,6 +268,34 @@ export class AutomationRenderer implements Renderer {
         this.#hoverY = null;
       }
     }
+
+    if (this.#hoverX === previousX && this.#hoverY === previousY) return;
+
+    // The marker is baked into the draw buffer, so moving it needs a
+    // repaint where it was and where it lands - without one, a partial
+    // paint elsewhere would strand the old marker on screen. The rects ride
+    // the bind this returns.
+    const trackHeight = yScale.bandwidth();
+
+    if (previousX != null && previousY != null) {
+      this.#pendingHoverRects.push({
+        x0: previousX - 1,
+        y0: previousY - 1,
+        x1: previousX + 2,
+        y1: previousY + trackHeight + 1,
+      });
+    }
+
+    if (this.#hoverX != null && this.#hoverY != null) {
+      this.#pendingHoverRects.push({
+        x0: this.#hoverX - 1,
+        y0: this.#hoverY - 1,
+        x1: this.#hoverX + 2,
+        y1: this.#hoverY + trackHeight + 1,
+      });
+    }
+
+    return { type: this.TYPE };
   }
 
   onBind(
@@ -262,6 +304,11 @@ export class AutomationRenderer implements Renderer {
     xScale: ScaleLinear<number, number>,
     yScale: ScaleBand<string>
   ): void {
+    for (const rect of this.#pendingHoverRects) {
+      this.reportDirty(rect.x0, rect.y0, rect.x1, rect.y1, false);
+    }
+    this.#pendingHoverRects.length = 0;
+
     const trackHeight = yScale.bandwidth();
     const points = state.automationData.flatMap((d) =>
       d.points.map((p) => ({

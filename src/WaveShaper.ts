@@ -50,10 +50,19 @@ export class WaveShaper {
    * Regions reported by renderers during the bind currently being emitted;
    * null outside one. See #emitBind.
    */
-  #bindReports: DirtyRect[] | null = null;
+  #bindReports: Array<{ rect: DirtyRect; hitPixels: boolean }> | null = null;
 
   /** Last zoom transform seen, for recognising pure-translation gestures. */
   #lastTransform: { k: number; x: number } | null = null;
+
+  /**
+   * Pan distance the blits have not yet shown, in CSS pixels. Shifts move by
+   * whole device pixels, so each tick leaves a sub-pixel remainder; carrying
+   * it forward keeps the shifted canvas within half a device pixel of the
+   * true view no matter how many fractional deltas arrive, where discarding
+   * it froze the canvas outright on devices that pan in sub-pixel steps.
+   */
+  #panResidual = 0;
 
   /** Whichever modifier the configuration resolves to right now. */
   get modifierKey() {
@@ -172,6 +181,7 @@ export class WaveShaper {
     // tick can already tell a pure translation from a zoom.
     .on("start", (e: d3.D3ZoomEvent<any, any>) => {
       this.#lastTransform = { k: e.transform.k, x: e.transform.x };
+      this.#panResidual = 0;
     })
     .on("zoom", (e: d3.D3ZoomEvent<any, any>) => {
       const previous = this.#lastTransform;
@@ -192,6 +202,8 @@ export class WaveShaper {
       if (translation && this.#panShift(e.transform.x - previous.x)) {
         this.#emitBind(undefined, true);
       } else {
+        // a full repaint draws the true view, absorbing any pan remainder
+        this.#panResidual = 0;
         this.#emitBind();
       }
     })
@@ -331,7 +343,8 @@ export class WaveShaper {
         this.bindData.bind(this),
         this.releaseBindData.bind(this),
         this.updateState.bind(this),
-        this.#hasModifier
+        this.#hasModifier,
+        this.#reportDirty
       )
     );
 
@@ -564,6 +577,11 @@ export class WaveShaper {
    * into their bounding box until the paint consumes them.
    */
   invalidateRect(rect: DirtyRect) {
+    this.#unionRegion(rect);
+    this.#hiddenDirty = true;
+  }
+
+  #unionRegion(rect: DirtyRect) {
     const region = this.#dirtyRegion;
 
     this.#dirtyRegion =
@@ -575,8 +593,6 @@ export class WaveShaper {
             x1: Math.max(region.x1, rect.x1),
             y1: Math.max(region.y1, rect.y1),
           };
-
-    this.#hiddenDirty = true;
   }
 
   /**
@@ -591,7 +607,7 @@ export class WaveShaper {
    * strip its blit exposed.
    */
   #emitBind(data?: BindData, silent = false) {
-    const reports: DirtyRect[] = [];
+    const reports: Array<{ rect: DirtyRect; hitPixels: boolean }> = [];
 
     // updateState can run inside a bind handler and emit its own bind, so
     // the collector nests instead of clobbering the outer one.
@@ -607,15 +623,26 @@ export class WaveShaper {
     if (silent) return;
 
     if (data?.type !== undefined && reports.length > 0) {
-      for (const rect of reports) this.invalidateRect(rect);
+      for (const report of reports) {
+        this.#unionRegion(report.rect);
+        // display-only regions - a hover marker - repaint without forcing
+        // the hit canvas to rebuild on the next probe
+        if (report.hitPixels) this.#hiddenDirty = true;
+      }
     } else {
       this.invalidate();
     }
   }
 
   /** Handed to renderers so they can report regions during a bind. */
-  #reportDirty = (x0: number, y0: number, x1: number, y1: number) => {
-    this.#bindReports?.push({ x0, y0, x1, y1 });
+  #reportDirty = (
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    hitPixels = true
+  ) => {
+    this.#bindReports?.push({ rect: { x0, y0, x1, y1 }, hitPixels });
   };
 
   /**
@@ -632,10 +659,19 @@ export class WaveShaper {
    */
   #panShift(deltaCss: number): boolean {
     const { width, height } = this.state.configuration;
-    const deltaDevice = Math.round(deltaCss * this.#dpr);
+
+    const total = deltaCss + this.#panResidual;
+    const deltaDevice = Math.round(total * this.#dpr);
+
+    if (Math.abs(deltaDevice) >= this.#width) {
+      this.#panResidual = 0;
+      return false;
+    }
+
+    // what the shift cannot show this tick is carried into the next one
+    this.#panResidual = total - deltaDevice / this.#dpr;
 
     if (deltaDevice === 0) return true;
-    if (Math.abs(deltaDevice) >= this.#width) return false;
 
     // Copy shifted into the spare buffer, then swap the pair - one copy
     // instead of copy-out-and-back, and no reliance on overlapping

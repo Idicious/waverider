@@ -166,12 +166,16 @@ export interface DirtyRect {
  * change of a type-filtered bind is reported, only those regions repaint;
  * a bind with no reports falls back to repainting everything, so renderers
  * that never call this stay correct.
+ *
+ * Pass hitPixels false when the change is display-only - a hover marker,
+ * say - so it does not force the hit canvas to rebuild on the next probe.
  */
 export type ReportDirtyFn = (
   x0: number,
   y0: number,
   x1: number,
-  y1: number
+  y1: number,
+  hitPixels?: boolean
 ) => void;
 
 export type Renderer = {
