@@ -8,6 +8,7 @@ import type {
   BoundData,
   Predicate,
   Renderer,
+  ReportDirtyFn,
   UpdateFn,
   WaveShaperState,
 } from "../types";
@@ -52,6 +53,8 @@ export class AutomationRenderer implements Renderer {
   #filterFn: Predicate = ALWAYS;
   #hoverX: number | null = null;
   #hoverY: number | null = null;
+  /** Band height at the time the marker was placed, for erasing it later. */
+  #lastTrackHeight = 0;
   #selectedSet = new Set<string>();
   #selectedOffsets = new Map<
     string,
@@ -69,7 +72,8 @@ export class AutomationRenderer implements Renderer {
     private readonly bindFn: (data: unknown, type: symbol) => string,
     private readonly releaseFn: (color: string) => void,
     private readonly updateState: (fn: UpdateFn<WaveShaperState>) => void,
-    private readonly hasModifier: (e: ModifierEvent) => boolean
+    private readonly hasModifier: (e: ModifierEvent) => boolean,
+    private readonly reportDirty: ReportDirtyFn
   ) {}
 
   onSelectStart(
@@ -208,6 +212,11 @@ export class AutomationRenderer implements Renderer {
         }
         break;
       }
+      default:
+        // Not this renderer's drag: requesting a rebind anyway would force
+        // a re-layout of every lane on every tick of an interval drag - and
+        // because this renderer reports no regions, a full repaint too.
+        return;
     }
 
     return { type: this.TYPE };
@@ -237,11 +246,15 @@ export class AutomationRenderer implements Renderer {
     xScale: ScaleLinear<number, number>,
     yScale: ScaleBand<string>
   ) {
+    const previousX = this.#hoverX;
+    const previousY = this.#hoverY;
+
     switch (d?.type) {
       case TYPES.AUTOMATION:
       case TYPES.AUTOMATION_POINT: {
         this.#hoverX = d3.pointer(e, this.canvas)[0];
         this.#hoverY = yScale(d.data.track)!;
+        this.#lastTrackHeight = yScale.bandwidth();
         break;
       }
       default: {
@@ -249,6 +262,59 @@ export class AutomationRenderer implements Renderer {
         this.#hoverY = null;
       }
     }
+
+    if (this.#hoverX === previousX && this.#hoverY === previousY) return;
+
+    // The marker is baked into the draw buffer, so moving it needs a
+    // repaint where it was and where it lands - without one, a partial
+    // paint elsewhere would strand the old marker on screen. Reported
+    // directly rather than through a bind: nothing about the lanes or
+    // points changed, so re-joining them per mousemove would be pure
+    // waste, and the render pass draws the marker from the fields set
+    // above. Display-only, since the marker never reaches the hit canvas.
+    const trackHeight = yScale.bandwidth();
+
+    if (previousX != null && previousY != null) {
+      this.reportDirty(
+        previousX - 1,
+        previousY - 1,
+        previousX + 2,
+        previousY + trackHeight + 1,
+        false
+      );
+    }
+
+    if (this.#hoverX != null && this.#hoverY != null) {
+      this.reportDirty(
+        this.#hoverX - 1,
+        this.#hoverY - 1,
+        this.#hoverX + 2,
+        this.#hoverY + trackHeight + 1,
+        false
+      );
+    }
+  }
+
+  onZoom(e: d3.D3ZoomEvent<any, any>) {
+    // The marker is pointer-anchored but its pixels are baked into a buffer
+    // the pan fast path shifts, so a gesture would drag it across the
+    // screen - and a strip repaint could draw a second one. The pointer
+    // relationship is broken mid-gesture anyway: drop the marker, and
+    // report its strip before the shift so the blit carries the erase to
+    // wherever those pixels land.
+    if (e.sourceEvent == null) return;
+    if (this.#hoverX == null || this.#hoverY == null) return;
+
+    this.reportDirty(
+      this.#hoverX - 1,
+      this.#hoverY - 1,
+      this.#hoverX + 2,
+      this.#hoverY + this.#lastTrackHeight + 1,
+      false
+    );
+
+    this.#hoverX = null;
+    this.#hoverY = null;
   }
 
   onBind(
@@ -269,6 +335,13 @@ export class AutomationRenderer implements Renderer {
 
     const that = this;
 
+    // Tracks whose automation this bind touched. A lane's curve spans
+    // between its points, so any point change can move pixels anywhere
+    // along the band - the full-width band is the tight honest region, and
+    // reporting it is what keeps an automation edit from repainting every
+    // other track.
+    const touchedTracks = new Set<string>();
+
     selection
       .selectAll<LaneNode, AutomationData>(
         `custom.${TYPES.AUTOMATION.description}`
@@ -286,6 +359,7 @@ export class AutomationRenderer implements Renderer {
               };
 
               d.points.sort((a, b) => a.time - b.time);
+              touchedTracks.add(d.track);
             }),
         (update) =>
           update.filter(this.#filterFn).each(function (d) {
@@ -293,12 +367,14 @@ export class AutomationRenderer implements Renderer {
             if (lane !== undefined) lane.y = yScale(d.track)!;
 
             d.points.sort((a, b) => a.time - b.time);
+            touchedTracks.add(d.track);
           }),
         (remove) =>
           remove
-            .each(function () {
+            .each(function (d) {
               const lane = this.__waveShaperLane;
               if (lane !== undefined) that.releaseFn(lane.bind);
+              touchedTracks.add(d.track);
             })
             .remove()
       );
@@ -331,15 +407,30 @@ export class AutomationRenderer implements Renderer {
 
               point.x = xScale(d.point.time);
               point.y = yScale(d.track)! + (1 - d.point.value) * trackHeight;
+              touchedTracks.add(d.track);
             }),
         (remove) =>
           remove
-            .each(function () {
+            .each(function (d) {
               const point = this.__waveShaperPoint;
               if (point !== undefined) that.releaseFn(point.bind);
+              touchedTracks.add(d.track);
             })
             .remove()
       );
+
+    const pad = AUTOMATION_HANDLE_RADIUS + 1;
+    for (const track of touchedTracks) {
+      const y = yScale(track);
+      if (y === undefined) continue;
+
+      this.reportDirty(
+        0,
+        y - pad,
+        state.configuration.width,
+        y + trackHeight + pad
+      );
+    }
   }
 
   onRender(

@@ -7,6 +7,8 @@ import type {
   BoundData,
   Predicate,
   AudioData,
+  DirtyRect,
+  ReportDirtyFn,
 } from "../types";
 import {
   ALWAYS,
@@ -94,8 +96,25 @@ export class IntervalRenderer implements Renderer {
     private readonly hasModifier: (e: ModifierEvent) => boolean,
     /** Device pixels per CSS pixel, read fresh so a resize is picked up. */
     private readonly getPixelRatio: () => number,
-    private readonly sampleRate: number
+    private readonly sampleRate: number,
+    private readonly reportDirty: ReportDirtyFn
   ) {}
+
+  /**
+   * Report the screen region an interval's layout occupies, padded for the
+   * fade handles that poke above the top edge and a pixel of antialiasing.
+   * Reporting every changed layout is what lets a filtered bind - one
+   * dragged interval - repaint only the pixels it actually touched.
+   */
+  #reportLayout(layout: IntervalLayout) {
+    const margin = RESIZE_HANDLE_WIDTH + 1;
+    this.reportDirty(
+      layout.x - margin,
+      layout.y - margin,
+      layout.x + layout.width + margin,
+      layout.y + layout.height + margin
+    );
+  }
 
   onStateUpdate(state: WaveShaperState) {
     this.#colorMap.clear();
@@ -139,6 +158,11 @@ export class IntervalRenderer implements Renderer {
         fadeOut(e, d.data, xScale);
         break;
       }
+      default:
+        // Not this renderer's drag: requesting a rebind anyway would force
+        // a re-layout of every interval on every tick of, say, an
+        // automation point drag - and a repaint to go with it.
+        return;
     }
 
     return this.#bindFilter;
@@ -236,8 +260,13 @@ export class IntervalRenderer implements Renderer {
 
     const audioData = this.#getAudioData(state, interval.data);
 
+    // A hidden waveform needs no summary either - with the flag off the
+    // interval layer does no per-sample work at all. The render flag is
+    // checked here too so toggling it back on recomputes on the next bind.
+    const hidden = state.configuration.showWaveform === false;
+
     // Interval is not in viewport, render nothing
-    if (intervalScreenDuration <= 0 || audioData === undefined) {
+    if (hidden || intervalScreenDuration <= 0 || audioData === undefined) {
       this.#drawDataCache.delete(interval.id);
     } else {
       this.#drawDataCache.set(
@@ -328,6 +357,7 @@ export class IntervalRenderer implements Renderer {
                 fadeOut: that.bindFn(d, TYPES.FADE_OUT),
               });
 
+              that.#reportLayout(this.__waveShaperLayout);
               that.summarizeAudio(d, state, xScale);
             }),
         (update) => {
@@ -345,6 +375,10 @@ export class IntervalRenderer implements Renderer {
               previous.bind
             );
 
+            // both where the element was and where it is now need repainting
+            that.#reportLayout(previous);
+            that.#reportLayout(this.__waveShaperLayout);
+
             that.summarizeAudio(d, state, xScale);
           });
 
@@ -357,7 +391,10 @@ export class IntervalRenderer implements Renderer {
               // grows for the lifetime of the page.
               that.clearAudioCache(d.id);
 
-              const bind = this.__waveShaperLayout?.bind;
+              const layout = this.__waveShaperLayout;
+              if (layout !== undefined) that.#reportLayout(layout);
+
+              const bind = layout?.bind;
               if (bind === undefined) return;
 
               that.releaseFn(bind.interval);
@@ -377,7 +414,8 @@ export class IntervalRenderer implements Renderer {
     toHidden: boolean,
     xScale: d3.ScaleLinear<number, number, never>,
     yScale: d3.ScaleBand<string>,
-    state: WaveShaperState
+    state: WaveShaperState,
+    clip?: DirtyRect
   ) {
     const that = this;
     return selection
@@ -385,6 +423,20 @@ export class IntervalRenderer implements Renderer {
       .each(function (d) {
         const layout = this.__waveShaperLayout;
         if (layout === undefined) return;
+
+        // The context is clipped to the repaint region, so skipping an
+        // element entirely outside it changes nothing on screen - it only
+        // saves building the element's draw calls, of which the waveform
+        // path is the expensive one.
+        if (
+          clip !== undefined &&
+          (layout.x + layout.width + RESIZE_HANDLE_WIDTH < clip.x0 ||
+            layout.x - RESIZE_HANDLE_WIDTH > clip.x1 ||
+            layout.y + layout.height + RESIZE_HANDLE_WIDTH < clip.y0 ||
+            layout.y - RESIZE_HANDLE_WIDTH > clip.y1)
+        ) {
+          return;
+        }
 
         const bind = layout.bind;
 
@@ -407,7 +459,7 @@ export class IntervalRenderer implements Renderer {
         context.fillRect(x, y, width, height);
 
         // audio waveform, not interactive so only render to display canvas
-        if (toHidden === false) {
+        if (toHidden === false && state.configuration.showWaveform !== false) {
           const data = that.#drawDataCache.get(d.id);
           if (data !== undefined) {
             renderWave(

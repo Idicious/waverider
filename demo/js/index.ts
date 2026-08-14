@@ -1,11 +1,15 @@
 import { WaveShaper } from "../../src";
 import { DataLoader } from "./data-loader";
 import type ApiResponse from "../data/session.json";
-import type { Automation } from "../../src/types";
+import type { Automation, WaveShaperConfig } from "../../src/types";
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 const automationCb = document.getElementById("automation") as HTMLInputElement;
 const rmsBandCb = document.getElementById("rms-band") as HTMLInputElement;
+const paintRegionsCb = document.getElementById(
+  "paint-regions"
+) as HTMLInputElement;
+const waveformCb = document.getElementById("waveform") as HTMLInputElement;
 
 (async function main() {
   const dataLoader = new DataLoader();
@@ -22,8 +26,14 @@ const rmsBandCb = document.getElementById("rms-band") as HTMLInputElement;
     res.json()
   );
 
-  automationCb.checked = configuration.showAutomation;
-  rmsBandCb.checked = configuration.showRmsBand;
+  // session.json only carries the required keys; the optional flags live on
+  // the library's config type
+  const config: WaveShaperConfig = configuration;
+
+  automationCb.checked = config.showAutomation;
+  rmsBandCb.checked = config.showRmsBand;
+  paintRegionsCb.checked = config.showPaintRegions ?? false;
+  waveformCb.checked = config.showWaveform ?? true;
   const audioData = await dataLoader.load(audio, ctx);
 
   const waveShaper = new WaveShaper(canvas, ctx, {
@@ -55,6 +65,20 @@ const rmsBandCb = document.getElementById("rms-band") as HTMLInputElement;
       undefined,
       undefined,
     ]);
+  });
+
+  paintRegionsCb.addEventListener("change", () => {
+    waveShaper.updateState((state) => {
+      state.configuration.showPaintRegions = paintRegionsCb.checked;
+      return [state, undefined, undefined];
+    });
+  });
+
+  waveformCb.addEventListener("change", () => {
+    waveShaper.updateState((state) => {
+      state.configuration.showWaveform = waveformCb.checked;
+      return [state, undefined, undefined];
+    });
   });
 
   (globalThis as any)["WaveShaper"] = waveShaper;

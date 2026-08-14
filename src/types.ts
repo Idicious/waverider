@@ -89,6 +89,23 @@ export type WaveShaperConfig = {
    * tracks are on screen at once.
    */
   showRmsBand: boolean;
+
+  /**
+   * Skip rendering waveforms entirely - intervals draw as plain colored
+   * blocks with their handles. This also skips computing the summaries the
+   * waveforms would need, so it is the cheapest the interval layer gets;
+   * worth having when a session grows past what a machine keeps up with.
+   * Undefined means on.
+   */
+  showWaveform?: boolean;
+
+  /**
+   * Debugging aid: tint the region each paint actually repainted, on the
+   * visible canvas only. Paints happen on change, so a tint stays up until
+   * the next one - a drag should flash just the dragged clip, a pan just
+   * the strip its blit exposed, and a zoom or settle the whole area.
+   */
+  showPaintRegions?: boolean;
 };
 
 export type DragFn<TItem> = (
@@ -136,6 +153,31 @@ export interface BindData {
   type: symbol;
 }
 
+/** An axis-aligned region of the render area, in CSS pixels. */
+export interface DirtyRect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/**
+ * Reports a region whose pixels a renderer changed during a bind. When every
+ * change of a type-filtered bind is reported, only those regions repaint;
+ * a bind with no reports falls back to repainting everything, so renderers
+ * that never call this stay correct.
+ *
+ * Pass hitPixels false when the change is display-only - a hover marker,
+ * say - so it does not force the hit canvas to rebuild on the next probe.
+ */
+export type ReportDirtyFn = (
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  hitPixels?: boolean
+) => void;
+
 export type Renderer = {
   TYPE: symbol;
 
@@ -152,7 +194,14 @@ export type Renderer = {
     toHidden: boolean,
     xScale: d3.ScaleLinear<number, number>,
     yScale: d3.ScaleBand<string>,
-    state: WaveShaperState
+    state: WaveShaperState,
+    /**
+     * Region being repainted, when it is less than the whole render area.
+     * The context is already clipped to it, so this is purely an
+     * optimization hint: elements entirely outside can be skipped without
+     * building their draw calls at all.
+     */
+    clip?: DirtyRect
   ) => void;
 
   onStateUpdate?: (state: WaveShaperState) => void;
