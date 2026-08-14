@@ -294,3 +294,39 @@ test("moving the automation hover marker never strands it", async ({
 
   await expectSettledEqualsFullRepaint(page);
 });
+
+test("dragging an automation point repaints only its track's band", async ({
+  page,
+}) => {
+  await loadPage(page);
+
+  await page.evaluate(() => {
+    const ws = (globalThis as any)["WaveShaper"];
+    ws.updateState((state: any) => {
+      state.configuration.showAutomation = true;
+      return [state, undefined, undefined];
+    });
+    ws.process();
+  });
+
+  // locate the second point of track 1's lane (time 1000, value 0.5)
+  const { xScale, yScale } = await getScales(page);
+  const box = (await (await page.$("canvas"))!.boundingBox())!;
+  const pointX = box.x + xScale(1000);
+  const pointY = box.y + (yScale("1") ?? 0) + 0.5 * yScale.bandwidth();
+
+  await page.mouse.move(pointX, pointY);
+  await page.mouse.down();
+  await page.mouse.move(pointX - 80, pointY + 15, { steps: 4 });
+  await page.mouse.up();
+
+  // the last drag tick's paint: one track band, nowhere near the canvas
+  const fraction = await page.evaluate(
+    () => (globalThis as any)["WaveShaper"].getDiagnostics().lastPaintFraction
+  );
+
+  expect(fraction).toBeGreaterThan(0);
+  expect(fraction).toBeLessThan(0.5);
+
+  await expectSettledEqualsFullRepaint(page);
+});

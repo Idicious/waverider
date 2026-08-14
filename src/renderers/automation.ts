@@ -335,6 +335,13 @@ export class AutomationRenderer implements Renderer {
 
     const that = this;
 
+    // Tracks whose automation this bind touched. A lane's curve spans
+    // between its points, so any point change can move pixels anywhere
+    // along the band - the full-width band is the tight honest region, and
+    // reporting it is what keeps an automation edit from repainting every
+    // other track.
+    const touchedTracks = new Set<string>();
+
     selection
       .selectAll<LaneNode, AutomationData>(
         `custom.${TYPES.AUTOMATION.description}`
@@ -352,6 +359,7 @@ export class AutomationRenderer implements Renderer {
               };
 
               d.points.sort((a, b) => a.time - b.time);
+              touchedTracks.add(d.track);
             }),
         (update) =>
           update.filter(this.#filterFn).each(function (d) {
@@ -359,12 +367,14 @@ export class AutomationRenderer implements Renderer {
             if (lane !== undefined) lane.y = yScale(d.track)!;
 
             d.points.sort((a, b) => a.time - b.time);
+            touchedTracks.add(d.track);
           }),
         (remove) =>
           remove
-            .each(function () {
+            .each(function (d) {
               const lane = this.__waveShaperLane;
               if (lane !== undefined) that.releaseFn(lane.bind);
+              touchedTracks.add(d.track);
             })
             .remove()
       );
@@ -397,15 +407,30 @@ export class AutomationRenderer implements Renderer {
 
               point.x = xScale(d.point.time);
               point.y = yScale(d.track)! + (1 - d.point.value) * trackHeight;
+              touchedTracks.add(d.track);
             }),
         (remove) =>
           remove
-            .each(function () {
+            .each(function (d) {
               const point = this.__waveShaperPoint;
               if (point !== undefined) that.releaseFn(point.bind);
+              touchedTracks.add(d.track);
             })
             .remove()
       );
+
+    const pad = AUTOMATION_HANDLE_RADIUS + 1;
+    for (const track of touchedTracks) {
+      const y = yScale(track);
+      if (y === undefined) continue;
+
+      this.reportDirty(
+        0,
+        y - pad,
+        state.configuration.width,
+        y + trackHeight + pad
+      );
+    }
   }
 
   onRender(
