@@ -68,25 +68,17 @@ const waveformCb = document.getElementById("waveform") as HTMLInputElement;
   });
 
   paintRegionsCb.addEventListener("change", () => {
-    const state = waveShaper.getState();
-    state.configuration.showPaintRegions = paintRegionsCb.checked;
-
-    waveShaper.updateState(() => [
-      { ...state, audioData },
-      undefined,
-      undefined,
-    ]);
+    waveShaper.updateState((state) => {
+      state.configuration.showPaintRegions = paintRegionsCb.checked;
+      return [state, undefined, undefined];
+    });
   });
 
   waveformCb.addEventListener("change", () => {
-    const state = waveShaper.getState();
-    state.configuration.showWaveform = waveformCb.checked;
-
-    waveShaper.updateState(() => [
-      { ...state, audioData },
-      undefined,
-      undefined,
-    ]);
+    waveShaper.updateState((state) => {
+      state.configuration.showWaveform = waveformCb.checked;
+      return [state, undefined, undefined];
+    });
   });
 
   (globalThis as any)["WaveShaper"] = waveShaper;

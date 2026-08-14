@@ -634,7 +634,13 @@ export class WaveShaper {
     }
   }
 
-  /** Handed to renderers so they can report regions during a bind. */
+  /**
+   * Handed to renderers so they can report regions whose pixels they
+   * changed. During a bind the reports feed that bind's invalidation
+   * decision; outside one - a hover moving, an async result landing - they
+   * take effect on the dirty region directly, so a report is never
+   * silently dropped.
+   */
   #reportDirty = (
     x0: number,
     y0: number,
@@ -642,7 +648,13 @@ export class WaveShaper {
     y1: number,
     hitPixels = true
   ) => {
-    this.#bindReports?.push({ rect: { x0, y0, x1, y1 }, hitPixels });
+    if (this.#bindReports !== null) {
+      this.#bindReports.push({ rect: { x0, y0, x1, y1 }, hitPixels });
+      return;
+    }
+
+    this.#unionRegion({ x0, y0, x1, y1 });
+    if (hitPixels) this.#hiddenDirty = true;
   };
 
   /**

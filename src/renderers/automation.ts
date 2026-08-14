@@ -6,7 +6,6 @@ import type {
   AutomationPoint,
   Selection,
   BoundData,
-  DirtyRect,
   Predicate,
   Renderer,
   ReportDirtyFn,
@@ -54,6 +53,8 @@ export class AutomationRenderer implements Renderer {
   #filterFn: Predicate = ALWAYS;
   #hoverX: number | null = null;
   #hoverY: number | null = null;
+  /** Band height at the time the marker was placed, for erasing it later. */
+  #lastTrackHeight = 0;
   #selectedSet = new Set<string>();
   #selectedOffsets = new Map<
     string,
@@ -65,14 +66,6 @@ export class AutomationRenderer implements Renderer {
   #selectedTrack: string | null = null;
 
   TYPE = Symbol("automation");
-
-  /**
-   * Marker regions whose pixels the last hover change touched, waiting for
-   * the bind that the change requested. Reported as display-only: the
-   * marker never reaches the hit canvas, so repainting it must not force a
-   * hit rebuild on the next probe.
-   */
-  #pendingHoverRects: DirtyRect[] = [];
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -261,6 +254,7 @@ export class AutomationRenderer implements Renderer {
       case TYPES.AUTOMATION_POINT: {
         this.#hoverX = d3.pointer(e, this.canvas)[0];
         this.#hoverY = yScale(d.data.track)!;
+        this.#lastTrackHeight = yScale.bandwidth();
         break;
       }
       default: {
@@ -273,29 +267,54 @@ export class AutomationRenderer implements Renderer {
 
     // The marker is baked into the draw buffer, so moving it needs a
     // repaint where it was and where it lands - without one, a partial
-    // paint elsewhere would strand the old marker on screen. The rects ride
-    // the bind this returns.
+    // paint elsewhere would strand the old marker on screen. Reported
+    // directly rather than through a bind: nothing about the lanes or
+    // points changed, so re-joining them per mousemove would be pure
+    // waste, and the render pass draws the marker from the fields set
+    // above. Display-only, since the marker never reaches the hit canvas.
     const trackHeight = yScale.bandwidth();
 
     if (previousX != null && previousY != null) {
-      this.#pendingHoverRects.push({
-        x0: previousX - 1,
-        y0: previousY - 1,
-        x1: previousX + 2,
-        y1: previousY + trackHeight + 1,
-      });
+      this.reportDirty(
+        previousX - 1,
+        previousY - 1,
+        previousX + 2,
+        previousY + trackHeight + 1,
+        false
+      );
     }
 
     if (this.#hoverX != null && this.#hoverY != null) {
-      this.#pendingHoverRects.push({
-        x0: this.#hoverX - 1,
-        y0: this.#hoverY - 1,
-        x1: this.#hoverX + 2,
-        y1: this.#hoverY + trackHeight + 1,
-      });
+      this.reportDirty(
+        this.#hoverX - 1,
+        this.#hoverY - 1,
+        this.#hoverX + 2,
+        this.#hoverY + trackHeight + 1,
+        false
+      );
     }
+  }
 
-    return { type: this.TYPE };
+  onZoom(e: d3.D3ZoomEvent<any, any>) {
+    // The marker is pointer-anchored but its pixels are baked into a buffer
+    // the pan fast path shifts, so a gesture would drag it across the
+    // screen - and a strip repaint could draw a second one. The pointer
+    // relationship is broken mid-gesture anyway: drop the marker, and
+    // report its strip before the shift so the blit carries the erase to
+    // wherever those pixels land.
+    if (e.sourceEvent == null) return;
+    if (this.#hoverX == null || this.#hoverY == null) return;
+
+    this.reportDirty(
+      this.#hoverX - 1,
+      this.#hoverY - 1,
+      this.#hoverX + 2,
+      this.#hoverY + this.#lastTrackHeight + 1,
+      false
+    );
+
+    this.#hoverX = null;
+    this.#hoverY = null;
   }
 
   onBind(
@@ -304,11 +323,6 @@ export class AutomationRenderer implements Renderer {
     xScale: ScaleLinear<number, number>,
     yScale: ScaleBand<string>
   ): void {
-    for (const rect of this.#pendingHoverRects) {
-      this.reportDirty(rect.x0, rect.y0, rect.x1, rect.y1, false);
-    }
-    this.#pendingHoverRects.length = 0;
-
     const trackHeight = yScale.bandwidth();
     const points = state.automationData.flatMap((d) =>
       d.points.map((p) => ({
